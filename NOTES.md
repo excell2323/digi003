@@ -1869,6 +1869,45 @@ Confirmed locally:
   `ProbeAudioRuntimeOutputRingOverrunFrames=0`, and
   `ProbeDigiLiveOutputCursorCatchUpCount=0`.
 
+## 0.2.162 Mapped Control State And Decoded Feedback
+
+Moves the experimental feedback path from raw slot-0 fragment echo to decoded
+MIDI/control-message feedback. The driver now re-encodes complete decoded
+messages into the two Digi 003 slot-0 feedback words only after they have passed
+the per-port MIDI decoder. Raw fragment echo is disabled.
+
+Adds first named control state diagnostics:
+
+```text
+ProbeControlStateSelect1Pressed
+ProbeControlStateFader1Touched
+ProbeControlStateFader1ControlNumber
+ProbeControlStateFader1Value
+ProbeControlStateFader1UpdateCount
+ProbeControlStateStopPressed
+ProbeControlStatePlayPressed
+ProbeControlStateMappedMessageCount
+ProbeControlStateUnknownMessageCount
+```
+
+Live test results:
+
+- SELECT 1 maps cleanly to press/release and returns to
+  `ProbeControlStateSelect1Pressed=0`.
+- STOP and PLAY use bit `0x40` in the third byte as the press flag:
+  `90 09 4e` / `90 09 0e` and `90 0a 4e` / `90 0a 0e`.
+- Fader 1 touch/release maps cleanly to `ProbeControlStateFader1Touched=1/0`.
+- Fader 1 movement updates `ProbeControlStateFader1ControlNumber` and
+  `ProbeControlStateFader1Value`.
+- The live run produced `93` mapped decoded messages from `186` raw slot-0
+  fragments with `0` unknown mapped messages.
+- Decoded feedback queued and transmitted all `186` feedback words from `93`
+  decoded control messages with `0` skipped messages and `0` drops.
+- Audio output counters stayed clean:
+  `ProbeAudioRuntimeOutputRingUnderrunFrames=0`,
+  `ProbeAudioRuntimeOutputRingOverrunFrames=0`, and
+  `ProbeDigiLiveOutputCursorCatchUpCount=0`.
+
 ## Async Control Reference
 
 The Rust `firewire-digi00x-protocols` crate is supplemental runtime code for internal functions outside the isochronous packet stream. It is useful for later mixer/control-surface work, but it does not solve the current live RX harvest issue.

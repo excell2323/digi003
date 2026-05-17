@@ -99,6 +99,21 @@ def main():
     decoded_count = parse_number(text, "ProbeControlDecodedMessageCount")
     decoded_index = parse_number(text, "ProbeControlDecodedRecentIndex")
     decoded_recent_count = parse_number(text, "ProbeControlDecodedRecentCount")
+    mapped_count = parse_number(text, "ProbeControlStateMappedMessageCount")
+    unknown_count = parse_number(text, "ProbeControlStateUnknownMessageCount")
+    last_kind = parse_number(text, "ProbeControlStateLastMappedKind")
+    select1 = parse_number(text, "ProbeControlStateSelect1Pressed")
+    fader1_touch = parse_number(text, "ProbeControlStateFader1Touched")
+    fader1_cc = parse_number(text, "ProbeControlStateFader1ControlNumber")
+    fader1_value = parse_number(text, "ProbeControlStateFader1Value")
+    fader1_updates = parse_number(text, "ProbeControlStateFader1UpdateCount")
+    stop = parse_number(text, "ProbeControlStateStopPressed")
+    play = parse_number(text, "ProbeControlStatePlayPressed")
+    feedback_messages = parse_number(text, "ProbeControlFeedbackMessageCount")
+    feedback_skipped = parse_number(text, "ProbeControlFeedbackSkippedCount")
+    echo_appends = parse_number(text, "ProbeControlEchoAppendCount")
+    echo_transmits = parse_number(text, "ProbeControlEchoTransmitCount")
+    echo_drops = parse_number(text, "ProbeControlEchoDropCount")
     words = parse_words(text)
     decoded_words = parse_data_words(text, "ProbeControlDecodedRecentMessages")
     if not words:
@@ -111,6 +126,17 @@ def main():
     print(
         f"decoded_count={decoded_count} "
         f"decoded_index={decoded_index} decoded_recent_count={decoded_recent_count}"
+    )
+    print(
+        f"state mapped={mapped_count} unknown={unknown_count} last_kind={last_kind} "
+        f"select1={select1} fader1_touch={fader1_touch} "
+        f"fader1_cc=0x{fader1_cc:02X} fader1_value={fader1_value} "
+        f"fader1_updates={fader1_updates} stop={stop} play={play}"
+    )
+    print(
+        f"feedback messages={feedback_messages} skipped={feedback_skipped} "
+        f"echo_words_append={echo_appends} echo_words_transmit={echo_transmits} "
+        f"echo_drops={echo_drops}"
     )
     print(f"active_words={len(active_words)}")
 

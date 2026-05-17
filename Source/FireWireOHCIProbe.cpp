@@ -225,9 +225,22 @@ constexpr uint32_t kDigiLiveMidiDecodedRecentMessageCount = 128;
 constexpr uint32_t kDigiLiveMidiDecodedRecentIndexedPublishCount = 16;
 constexpr uint32_t kDigiLiveMidiPortCount = 16;
 constexpr uint32_t kDigiLiveMidiBytesPerMessage = 3;
+constexpr uint32_t kDigiLiveMidiControlPortNibble = 0x0e;
+constexpr uint32_t kDigiLiveMidiRawFragmentEchoEnabled = 0;
+constexpr uint32_t kDigiLiveMidiDecodedFeedbackEnabled = 1;
 constexpr uint32_t kDigiLiveMidiEchoToOutputEnabled = 1;
 constexpr uint32_t kDigiLiveMidiEchoConsolePortOnlyEnabled = 1;
 constexpr uint32_t kDigiLiveMidiEchoQueueSize = 1024;
+constexpr uint32_t kDigiLiveControlKindUnknown = 0;
+constexpr uint32_t kDigiLiveControlKindSelect1 = 1;
+constexpr uint32_t kDigiLiveControlKindFader1Touch = 2;
+constexpr uint32_t kDigiLiveControlKindFader1Move = 3;
+constexpr uint32_t kDigiLiveControlKindStop = 4;
+constexpr uint32_t kDigiLiveControlKindPlay = 5;
+constexpr uint32_t kDigiLiveControlNoteSelect1 = 0x00;
+constexpr uint32_t kDigiLiveControlNoteFader1Touch = 0x03;
+constexpr uint32_t kDigiLiveControlNoteStop = 0x09;
+constexpr uint32_t kDigiLiveControlNotePlay = 0x0a;
 constexpr uint32_t kDigi00xDuplexCIPSFC44100 = 1;
 constexpr uint32_t kDigi00xCIPDBCMask = 0x000000ff;
 constexpr uint32_t kDigi00xCIPSYTMask = 0x0000ffff;
@@ -1209,6 +1222,16 @@ uint32_t gDigiLiveMidiLastControlValue = 0;
 uint32_t gDigiLiveMidiDecodedRecentIndex = 0;
 uint32_t gDigiLiveMidiDecodedRecentCount = 0;
 uint32_t gDigiLiveMidiDecodedRecentMessages[kDigiLiveMidiDecodedRecentMessageCount] = {};
+uint64_t gDigiLiveControlMappedMessageCount = 0;
+uint64_t gDigiLiveControlUnknownMessageCount = 0;
+uint32_t gDigiLiveControlLastMappedKind = kDigiLiveControlKindUnknown;
+uint32_t gDigiLiveControlSelect1Pressed = 0;
+uint32_t gDigiLiveControlFader1Touched = 0;
+uint32_t gDigiLiveControlFader1ControlNumber = 0;
+uint32_t gDigiLiveControlFader1Value = 0;
+uint64_t gDigiLiveControlFader1UpdateCount = 0;
+uint32_t gDigiLiveControlStopPressed = 0;
+uint32_t gDigiLiveControlPlayPressed = 0;
 uint64_t gDigiLiveMidiLoggedMessageCount = 0;
 uint32_t gDigiLiveMidiEchoQueueBusy = 0;
 uint32_t gDigiLiveMidiEchoReadIndex = 0;
@@ -1217,6 +1240,8 @@ uint32_t gDigiLiveMidiEchoQueueCount = 0;
 uint32_t gDigiLiveMidiEchoLastQueuedRawWordBE = 0;
 uint32_t gDigiLiveMidiEchoLastTransmitRawWordBE = 0;
 uint32_t gDigiLiveMidiEchoQueue[kDigiLiveMidiEchoQueueSize] = {};
+uint64_t gDigiLiveMidiFeedbackMessageCount = 0;
+uint64_t gDigiLiveMidiFeedbackSkippedCount = 0;
 uint64_t gDigiLiveMidiEchoAppendCount = 0;
 uint64_t gDigiLiveMidiEchoDropCount = 0;
 uint64_t gDigiLiveMidiEchoTransmitCount = 0;
@@ -1564,6 +1589,30 @@ PublishDigiLiveControlDiagnostics(uint32_t rawWordBE,
     AddNumberProperty(properties, "ProbeControlDecodedLastControlValue", gDigiLiveMidiLastControlValue, 32);
     AddNumberProperty(properties, "ProbeControlDecodedRecentIndex", gDigiLiveMidiDecodedRecentIndex, 32);
     AddNumberProperty(properties, "ProbeControlDecodedRecentCount", gDigiLiveMidiDecodedRecentCount, 32);
+    AddNumberProperty(properties, "ProbeControlStateMappedMessageCount", gDigiLiveControlMappedMessageCount, 64);
+    AddNumberProperty(properties, "ProbeControlStateUnknownMessageCount", gDigiLiveControlUnknownMessageCount, 64);
+    AddNumberProperty(properties, "ProbeControlStateLastMappedKind", gDigiLiveControlLastMappedKind, 32);
+    AddNumberProperty(properties, "ProbeControlStateSelect1Pressed", gDigiLiveControlSelect1Pressed, 32);
+    AddNumberProperty(properties, "ProbeControlStateFader1Touched", gDigiLiveControlFader1Touched, 32);
+    AddNumberProperty(properties,
+                      "ProbeControlStateFader1ControlNumber",
+                      gDigiLiveControlFader1ControlNumber,
+                      32);
+    AddNumberProperty(properties, "ProbeControlStateFader1Value", gDigiLiveControlFader1Value, 32);
+    AddNumberProperty(properties,
+                      "ProbeControlStateFader1UpdateCount",
+                      gDigiLiveControlFader1UpdateCount,
+                      64);
+    AddNumberProperty(properties, "ProbeControlStateStopPressed", gDigiLiveControlStopPressed, 32);
+    AddNumberProperty(properties, "ProbeControlStatePlayPressed", gDigiLiveControlPlayPressed, 32);
+    AddNumberProperty(properties,
+                      "ProbeControlRawFragmentEchoEnabled",
+                      kDigiLiveMidiRawFragmentEchoEnabled,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeControlDecodedFeedbackEnabled",
+                      kDigiLiveMidiDecodedFeedbackEnabled,
+                      32);
     AddNumberProperty(properties, "ProbeControlEchoEnabled", kDigiLiveMidiEchoToOutputEnabled, 32);
     AddNumberProperty(properties,
                       "ProbeControlEchoConsolePortOnlyEnabled",
@@ -1572,6 +1621,8 @@ PublishDigiLiveControlDiagnostics(uint32_t rawWordBE,
     AddNumberProperty(properties, "ProbeControlEchoQueueCount", gDigiLiveMidiEchoQueueCount, 32);
     AddNumberProperty(properties, "ProbeControlEchoLastQueuedRawWordBE", gDigiLiveMidiEchoLastQueuedRawWordBE, 32);
     AddNumberProperty(properties, "ProbeControlEchoLastTransmitRawWordBE", gDigiLiveMidiEchoLastTransmitRawWordBE, 32);
+    AddNumberProperty(properties, "ProbeControlFeedbackMessageCount", gDigiLiveMidiFeedbackMessageCount, 64);
+    AddNumberProperty(properties, "ProbeControlFeedbackSkippedCount", gDigiLiveMidiFeedbackSkippedCount, 64);
     AddNumberProperty(properties, "ProbeControlEchoAppendCount", gDigiLiveMidiEchoAppendCount, 64);
     AddNumberProperty(properties, "ProbeControlEchoDropCount", gDigiLiveMidiEchoDropCount, 64);
     AddNumberProperty(properties, "ProbeControlEchoTransmitCount", gDigiLiveMidiEchoTransmitCount, 64);
@@ -1615,6 +1666,60 @@ ToBigEndian32(uint32_t value)
 }
 
 void
+QueueDigiLiveDecodedMidiFeedback(uint32_t portNibble,
+                                 uint8_t status,
+                                 uint8_t data1,
+                                 uint8_t data2);
+
+void
+ObserveDigiLiveMappedControlState(uint32_t portNibble,
+                                  uint8_t status,
+                                  uint8_t data1,
+                                  uint8_t data2)
+{
+    if (portNibble != kDigiLiveMidiControlPortNibble) {
+        gDigiLiveControlUnknownMessageCount++;
+        return;
+    }
+
+    uint8_t command = static_cast<uint8_t>(status & 0xf0u);
+    bool mapped = false;
+
+    if (command == 0x90u) {
+        uint32_t pressed = (data2 & 0x40u) != 0 ? 1u : 0u;
+        if (data1 == kDigiLiveControlNoteSelect1) {
+            gDigiLiveControlSelect1Pressed = pressed;
+            gDigiLiveControlLastMappedKind = kDigiLiveControlKindSelect1;
+            mapped = true;
+        } else if (data1 == kDigiLiveControlNoteFader1Touch) {
+            gDigiLiveControlFader1Touched = pressed;
+            gDigiLiveControlLastMappedKind = kDigiLiveControlKindFader1Touch;
+            mapped = true;
+        } else if (data1 == kDigiLiveControlNoteStop) {
+            gDigiLiveControlStopPressed = pressed;
+            gDigiLiveControlLastMappedKind = kDigiLiveControlKindStop;
+            mapped = true;
+        } else if (data1 == kDigiLiveControlNotePlay) {
+            gDigiLiveControlPlayPressed = pressed;
+            gDigiLiveControlLastMappedKind = kDigiLiveControlKindPlay;
+            mapped = true;
+        }
+    } else if (command == 0xb0u) {
+        gDigiLiveControlFader1ControlNumber = data1;
+        gDigiLiveControlFader1Value = data2;
+        gDigiLiveControlFader1UpdateCount++;
+        gDigiLiveControlLastMappedKind = kDigiLiveControlKindFader1Move;
+        mapped = true;
+    }
+
+    if (mapped) {
+        gDigiLiveControlMappedMessageCount++;
+    } else {
+        gDigiLiveControlUnknownMessageCount++;
+    }
+}
+
+void
 ObserveDigiLiveDecodedMidiMessage(uint32_t portNibble,
                                   uint8_t status,
                                   uint8_t data1,
@@ -1649,6 +1754,9 @@ ObserveDigiLiveDecodedMidiMessage(uint32_t portNibble,
     if (gDigiLiveMidiDecodedRecentCount < kDigiLiveMidiDecodedRecentMessageCount) {
         gDigiLiveMidiDecodedRecentCount++;
     }
+
+    ObserveDigiLiveMappedControlState(portNibble, status, data1, data2);
+    QueueDigiLiveDecodedMidiFeedback(portNibble, status, data1, data2);
 }
 
 void
@@ -1716,29 +1824,81 @@ ReleaseDigiLiveMidiEchoQueue()
     __sync_lock_release(&gDigiLiveMidiEchoQueueBusy);
 }
 
-void
-AppendDigiLiveMidiEchoWordBE(uint32_t wordBE)
+bool
+AppendDigiLiveMidiEchoWordsBE(const uint32_t * words, uint32_t wordCount)
 {
     if (kDigiLiveMidiEchoToOutputEnabled == 0) {
-        return;
+        return false;
+    }
+    if (words == nullptr || wordCount == 0) {
+        return false;
     }
     if (!TryAcquireDigiLiveMidiEchoQueue()) {
-        return;
+        return false;
     }
 
-    if (gDigiLiveMidiEchoQueueCount >= kDigiLiveMidiEchoQueueSize) {
-        gDigiLiveMidiEchoDropCount++;
+    if (gDigiLiveMidiEchoQueueCount + wordCount > kDigiLiveMidiEchoQueueSize) {
+        gDigiLiveMidiEchoDropCount += wordCount;
         ReleaseDigiLiveMidiEchoQueue();
+        return false;
+    }
+
+    for (uint32_t i = 0; i < wordCount; ++i) {
+        uint32_t wordBE = words[i];
+        gDigiLiveMidiEchoQueue[gDigiLiveMidiEchoWriteIndex] = wordBE;
+        gDigiLiveMidiEchoWriteIndex =
+            (gDigiLiveMidiEchoWriteIndex + 1) % kDigiLiveMidiEchoQueueSize;
+        gDigiLiveMidiEchoQueueCount++;
+        gDigiLiveMidiEchoLastQueuedRawWordBE = wordBE;
+        gDigiLiveMidiEchoAppendCount++;
+    }
+    ReleaseDigiLiveMidiEchoQueue();
+    return true;
+}
+
+bool
+AppendDigiLiveMidiEchoWordBE(uint32_t wordBE)
+{
+    return AppendDigiLiveMidiEchoWordsBE(&wordBE, 1);
+}
+
+void
+QueueDigiLiveDecodedMidiFeedback(uint32_t portNibble,
+                                 uint8_t status,
+                                 uint8_t data1,
+                                 uint8_t data2)
+{
+    if (kDigiLiveMidiDecodedFeedbackEnabled == 0) {
+        return;
+    }
+    if (portNibble != kDigiLiveMidiControlPortNibble) {
+        gDigiLiveMidiFeedbackSkippedCount++;
         return;
     }
 
-    gDigiLiveMidiEchoQueue[gDigiLiveMidiEchoWriteIndex] = wordBE;
-    gDigiLiveMidiEchoWriteIndex =
-        (gDigiLiveMidiEchoWriteIndex + 1) % kDigiLiveMidiEchoQueueSize;
-    gDigiLiveMidiEchoQueueCount++;
-    gDigiLiveMidiEchoLastQueuedRawWordBE = wordBE;
-    gDigiLiveMidiEchoAppendCount++;
-    ReleaseDigiLiveMidiEchoQueue();
+    uint8_t command = static_cast<uint8_t>(status & 0xf0u);
+    if (command != 0x80u && command != 0x90u && command != 0xb0u) {
+        gDigiLiveMidiFeedbackSkippedCount++;
+        return;
+    }
+
+    uint32_t controlLength2 = ((portNibble & 0x0fu) << 4) | 0x02u;
+    uint32_t controlLength1 = ((portNibble & 0x0fu) << 4) | 0x01u;
+    uint32_t words[2] = {
+        0x80000000u |
+            (static_cast<uint32_t>(status) << 16) |
+            (static_cast<uint32_t>(data1) << 8) |
+            controlLength2,
+        0x80000000u |
+            (static_cast<uint32_t>(data2) << 16) |
+            controlLength1,
+    };
+
+    if (AppendDigiLiveMidiEchoWordsBE(words, 2)) {
+        gDigiLiveMidiFeedbackMessageCount++;
+    } else {
+        gDigiLiveMidiFeedbackSkippedCount++;
+    }
 }
 
 uint32_t
@@ -1801,8 +1961,9 @@ ObserveDigiLiveMidiSlot0(uint32_t slot0WordBE)
     }
     ObserveDigiLiveMidiPayloadBytes(portNibble, data0, data1, length);
 
-    if (kDigiLiveMidiEchoConsolePortOnlyEnabled == 0 || portNibble != 0) {
-        AppendDigiLiveMidiEchoWordBE(slot0WordBE);
+    if (kDigiLiveMidiRawFragmentEchoEnabled != 0 &&
+        (kDigiLiveMidiEchoConsolePortOnlyEnabled == 0 || portNibble != 0)) {
+        (void)AppendDigiLiveMidiEchoWordBE(slot0WordBE);
     }
 
     gDigiLiveMidiLastMessageRawWordBE = slot0WordBE;
@@ -2408,6 +2569,30 @@ PublishAudioRuntimeDiagnostics()
     AddNumberProperty(properties, "ProbeControlDecodedLastControlValue", gDigiLiveMidiLastControlValue, 32);
     AddNumberProperty(properties, "ProbeControlDecodedRecentIndex", gDigiLiveMidiDecodedRecentIndex, 32);
     AddNumberProperty(properties, "ProbeControlDecodedRecentCount", gDigiLiveMidiDecodedRecentCount, 32);
+    AddNumberProperty(properties, "ProbeControlStateMappedMessageCount", gDigiLiveControlMappedMessageCount, 64);
+    AddNumberProperty(properties, "ProbeControlStateUnknownMessageCount", gDigiLiveControlUnknownMessageCount, 64);
+    AddNumberProperty(properties, "ProbeControlStateLastMappedKind", gDigiLiveControlLastMappedKind, 32);
+    AddNumberProperty(properties, "ProbeControlStateSelect1Pressed", gDigiLiveControlSelect1Pressed, 32);
+    AddNumberProperty(properties, "ProbeControlStateFader1Touched", gDigiLiveControlFader1Touched, 32);
+    AddNumberProperty(properties,
+                      "ProbeControlStateFader1ControlNumber",
+                      gDigiLiveControlFader1ControlNumber,
+                      32);
+    AddNumberProperty(properties, "ProbeControlStateFader1Value", gDigiLiveControlFader1Value, 32);
+    AddNumberProperty(properties,
+                      "ProbeControlStateFader1UpdateCount",
+                      gDigiLiveControlFader1UpdateCount,
+                      64);
+    AddNumberProperty(properties, "ProbeControlStateStopPressed", gDigiLiveControlStopPressed, 32);
+    AddNumberProperty(properties, "ProbeControlStatePlayPressed", gDigiLiveControlPlayPressed, 32);
+    AddNumberProperty(properties,
+                      "ProbeControlRawFragmentEchoEnabled",
+                      kDigiLiveMidiRawFragmentEchoEnabled,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeControlDecodedFeedbackEnabled",
+                      kDigiLiveMidiDecodedFeedbackEnabled,
+                      32);
     AddNumberProperty(properties, "ProbeControlEchoEnabled", kDigiLiveMidiEchoToOutputEnabled, 32);
     AddNumberProperty(properties,
                       "ProbeControlEchoConsolePortOnlyEnabled",
@@ -2416,6 +2601,8 @@ PublishAudioRuntimeDiagnostics()
     AddNumberProperty(properties, "ProbeControlEchoQueueCount", gDigiLiveMidiEchoQueueCount, 32);
     AddNumberProperty(properties, "ProbeControlEchoLastQueuedRawWordBE", gDigiLiveMidiEchoLastQueuedRawWordBE, 32);
     AddNumberProperty(properties, "ProbeControlEchoLastTransmitRawWordBE", gDigiLiveMidiEchoLastTransmitRawWordBE, 32);
+    AddNumberProperty(properties, "ProbeControlFeedbackMessageCount", gDigiLiveMidiFeedbackMessageCount, 64);
+    AddNumberProperty(properties, "ProbeControlFeedbackSkippedCount", gDigiLiveMidiFeedbackSkippedCount, 64);
     AddNumberProperty(properties, "ProbeControlEchoAppendCount", gDigiLiveMidiEchoAppendCount, 64);
     AddNumberProperty(properties, "ProbeControlEchoDropCount", gDigiLiveMidiEchoDropCount, 64);
     AddNumberProperty(properties, "ProbeControlEchoTransmitCount", gDigiLiveMidiEchoTransmitCount, 64);
@@ -3914,6 +4101,16 @@ ConfigureAudioDevice(FireWireOHCIProbe * driver)
     for (uint32_t i = 0; i < kDigiLiveMidiDecodedRecentMessageCount; ++i) {
         gDigiLiveMidiDecodedRecentMessages[i] = 0;
     }
+    gDigiLiveControlMappedMessageCount = 0;
+    gDigiLiveControlUnknownMessageCount = 0;
+    gDigiLiveControlLastMappedKind = kDigiLiveControlKindUnknown;
+    gDigiLiveControlSelect1Pressed = 0;
+    gDigiLiveControlFader1Touched = 0;
+    gDigiLiveControlFader1ControlNumber = 0;
+    gDigiLiveControlFader1Value = 0;
+    gDigiLiveControlFader1UpdateCount = 0;
+    gDigiLiveControlStopPressed = 0;
+    gDigiLiveControlPlayPressed = 0;
     gDigiLiveMidiLoggedMessageCount = 0;
     gDigiLiveMidiEchoQueueBusy = 0;
     gDigiLiveMidiEchoReadIndex = 0;
@@ -3924,6 +4121,8 @@ ConfigureAudioDevice(FireWireOHCIProbe * driver)
     for (uint32_t i = 0; i < kDigiLiveMidiEchoQueueSize; ++i) {
         gDigiLiveMidiEchoQueue[i] = 0;
     }
+    gDigiLiveMidiFeedbackMessageCount = 0;
+    gDigiLiveMidiFeedbackSkippedCount = 0;
     gDigiLiveMidiEchoAppendCount = 0;
     gDigiLiveMidiEchoDropCount = 0;
     gDigiLiveMidiEchoTransmitCount = 0;
