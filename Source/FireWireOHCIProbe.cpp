@@ -7,9 +7,11 @@
 #include <AudioDriverKit/IOUserAudioStream.h>
 #include <DriverKit/IODispatchQueue.h>
 #include <DriverKit/IOBufferMemoryDescriptor.h>
+#include <DriverKit/IOInterruptDispatchSource.h>
 #include <DriverKit/IODMACommand.h>
 #include <DriverKit/IOLib.h>
 #include <DriverKit/IOUserServer.h>
+#include <DriverKit/OSAction.h>
 #include <DriverKit/OSData.h>
 #include <DriverKit/OSDictionary.h>
 #include <DriverKit/OSNumber.h>
@@ -95,6 +97,8 @@ constexpr uint32_t kOhciEventAsyncReqRcv = 0x00000004;
 constexpr uint32_t kOhciEventAsyncRspRcv = 0x00000008;
 constexpr uint32_t kOhciEventReqPacket = 0x00000010;
 constexpr uint32_t kOhciEventRspPacket = 0x00000020;
+constexpr uint32_t kOhciEventIsochTx = 0x00000040;
+constexpr uint32_t kOhciEventIsochRx = 0x00000080;
 constexpr uint32_t kOhciEventSelfIDComplete = 0x00010000;
 constexpr uint32_t kOhciEventBusReset = 0x00020000;
 constexpr uint32_t kOhciEventRegisterAccessFail = 0x00040000;
@@ -112,6 +116,7 @@ constexpr uint32_t kOhciAsyncInterruptMask = kOhciEventReqTxComplete |
                                              kOhciEventAsyncRspRcv |
                                              kOhciEventReqPacket |
                                              kOhciEventRspPacket;
+constexpr uint32_t kOhciIsochInterruptMask = kOhciEventIsochTx | kOhciEventIsochRx;
 constexpr uint32_t kOhciDiagnosticInterruptMask = kOhciAsyncInterruptMask |
                                                  kOhciEventSelfIDComplete |
                                                  kOhciEventBusReset |
@@ -233,6 +238,7 @@ constexpr uint32_t kDigi00xDuplexIRDescriptorDataSize =
     8 * kDigi00xDuplexDataBlockBytes;
 constexpr uint32_t kDigiLiveSingleDescriptorReceiveEnabled = 0;
 constexpr uint32_t kDigiLiveReceiveIRQInterval = 8;
+constexpr uint32_t kOHCIInterruptDispatchEnabled = 0;
 constexpr uint32_t kDigiLiveRequireIREventBeforeSync = 1;
 constexpr uint32_t kDigiLiveIREventGateMissBypassCount = 4;
 constexpr uint32_t kDigiLiveIRCommandPtrCatchUpEnabled = 1;
@@ -940,6 +946,32 @@ IOPCIDevice * gPCIDevice = nullptr;
 uint8_t gPCIMemoryIndex = 0xff;
 uint32_t gDigiDestinationID = 0xffffffff;
 IODispatchQueue * gAudioRefreshQueue = nullptr;
+IOInterruptDispatchSource * gOHCIInterruptSource = nullptr;
+OSAction * gOHCIInterruptAction = nullptr;
+uint32_t gOHCIInterruptConfigureRet = static_cast<uint32_t>(kIOReturnNotReady);
+uint32_t gOHCIInterruptActionCreateRet = static_cast<uint32_t>(kIOReturnNotReady);
+uint32_t gOHCIInterruptSourceCreateRet = static_cast<uint32_t>(kIOReturnNotReady);
+uint32_t gOHCIInterruptSetHandlerRet = static_cast<uint32_t>(kIOReturnNotReady);
+uint32_t gOHCIInterruptReady = 0;
+uint32_t gOHCIInterruptEnabled = 0;
+uint32_t gOHCIInterruptUseMSIX = 0;
+uint64_t gOHCIInterruptCount = 0;
+uint64_t gOHCIInterruptIsoRecvCount = 0;
+uint64_t gOHCIInterruptIsoXmitCount = 0;
+uint64_t gOHCIInterruptOtherCount = 0;
+uint64_t gOHCIInterruptDigiHarvestAttemptCount = 0;
+uint64_t gOHCIInterruptDigiHarvestSuccessCount = 0;
+uint64_t gOHCIInterruptDigiHarvestBusyCount = 0;
+uint64_t gOHCIInterruptDigiHarvestEmptyCount = 0;
+uint32_t gOHCIInterruptLastHarvestRet = static_cast<uint32_t>(kIOReturnNotReady);
+uint32_t gOHCIInterruptLastIntEvent = 0;
+uint32_t gOHCIInterruptLastIsoRecvEvent = 0;
+uint32_t gOHCIInterruptLastIsoXmitEvent = 0;
+uint32_t gOHCIInterruptLastClearedIntEvent = 0;
+uint32_t gOHCIInterruptLastClearedIsoRecvEvent = 0;
+uint32_t gOHCIInterruptLastClearedIsoXmitEvent = 0;
+uint64_t gOHCIInterruptLastCount = 0;
+uint64_t gOHCIInterruptLastTime = 0;
 uint32_t gAudioDeviceCreateRet = static_cast<uint32_t>(kIOReturnNotReady);
 uint32_t gAudioStreamCreateRet = static_cast<uint32_t>(kIOReturnNotReady);
 uint32_t gAudioAddStreamRet = static_cast<uint32_t>(kIOReturnNotReady);
@@ -1007,6 +1039,7 @@ uint32_t gDigiLiveStartAttemptCount = 0;
 uint32_t gDigiLiveStartSuccessCount = 0;
 uint32_t gDigiLiveStopAttemptCount = 0;
 uint32_t gDigiLiveStopSuccessCount = 0;
+uint32_t gDigiLiveStopDrainWaitLoops = 0;
 uint32_t gDigiLiveRunning = 0;
 uint32_t gDigiLiveStarting = 0;
 uint32_t gDigiLiveStopping = 0;
@@ -1652,13 +1685,124 @@ ReturnCodeToProperty(kern_return_t ret)
 }
 
 void
+ResetOHCIInterruptDiagnostics()
+{
+    gOHCIInterruptConfigureRet = ReturnCodeToProperty(kIOReturnNotReady);
+    gOHCIInterruptActionCreateRet = ReturnCodeToProperty(kIOReturnNotReady);
+    gOHCIInterruptSourceCreateRet = ReturnCodeToProperty(kIOReturnNotReady);
+    gOHCIInterruptSetHandlerRet = ReturnCodeToProperty(kIOReturnNotReady);
+    gOHCIInterruptReady = 0;
+    gOHCIInterruptEnabled = 0;
+    gOHCIInterruptUseMSIX = 0;
+    gOHCIInterruptCount = 0;
+    gOHCIInterruptIsoRecvCount = 0;
+    gOHCIInterruptIsoXmitCount = 0;
+    gOHCIInterruptOtherCount = 0;
+    gOHCIInterruptDigiHarvestAttemptCount = 0;
+    gOHCIInterruptDigiHarvestSuccessCount = 0;
+    gOHCIInterruptDigiHarvestBusyCount = 0;
+    gOHCIInterruptDigiHarvestEmptyCount = 0;
+    gOHCIInterruptLastHarvestRet = ReturnCodeToProperty(kIOReturnNotReady);
+    gOHCIInterruptLastIntEvent = 0;
+    gOHCIInterruptLastIsoRecvEvent = 0;
+    gOHCIInterruptLastIsoXmitEvent = 0;
+    gOHCIInterruptLastClearedIntEvent = 0;
+    gOHCIInterruptLastClearedIsoRecvEvent = 0;
+    gOHCIInterruptLastClearedIsoXmitEvent = 0;
+    gOHCIInterruptLastCount = 0;
+    gOHCIInterruptLastTime = 0;
+}
+
+kern_return_t
+ConfigureOHCIInterruptDispatch(FireWireOHCIProbe * driver, IOPCIDevice * pciDevice)
+{
+    if (driver == nullptr || pciDevice == nullptr || gAudioRefreshQueue == nullptr) {
+        return kIOReturnNotReady;
+    }
+    if (gOHCIInterruptSource != nullptr && gOHCIInterruptAction != nullptr) {
+        gOHCIInterruptReady = 1;
+        return kIOReturnSuccess;
+    }
+
+    kern_return_t configureRet =
+        pciDevice->ConfigureInterrupts(kIOInterruptTypePCIMessagedX, 1, 1, 0);
+    gOHCIInterruptUseMSIX = configureRet == kIOReturnSuccess ? 1 : 0;
+    if (configureRet != kIOReturnSuccess) {
+        configureRet = pciDevice->ConfigureInterrupts(kIOInterruptTypePCIMessaged, 1, 1, 0);
+        gOHCIInterruptUseMSIX = 0;
+    }
+    gOHCIInterruptConfigureRet = ReturnCodeToProperty(configureRet);
+    if (configureRet != kIOReturnSuccess) {
+        return configureRet;
+    }
+
+    OSAction * action = nullptr;
+    kern_return_t actionRet = driver->CreateActionInterruptOccurred(0, &action);
+    gOHCIInterruptActionCreateRet = ReturnCodeToProperty(actionRet);
+    if (actionRet != kIOReturnSuccess || action == nullptr) {
+        return actionRet == kIOReturnSuccess ? kIOReturnNoResources : actionRet;
+    }
+    gOHCIInterruptAction = action;
+
+    IOInterruptDispatchSource * source = nullptr;
+    kern_return_t sourceRet =
+        IOInterruptDispatchSource::Create(pciDevice, 0, gAudioRefreshQueue, &source);
+    gOHCIInterruptSourceCreateRet = ReturnCodeToProperty(sourceRet);
+    if (sourceRet != kIOReturnSuccess || source == nullptr) {
+        OSSafeReleaseNULL(gOHCIInterruptAction);
+        return sourceRet == kIOReturnSuccess ? kIOReturnNoResources : sourceRet;
+    }
+    gOHCIInterruptSource = source;
+
+    kern_return_t handlerRet = gOHCIInterruptSource->SetHandler(gOHCIInterruptAction);
+    gOHCIInterruptSetHandlerRet = ReturnCodeToProperty(handlerRet);
+    if (handlerRet != kIOReturnSuccess) {
+        OSSafeReleaseNULL(gOHCIInterruptSource);
+        OSSafeReleaseNULL(gOHCIInterruptAction);
+        return handlerRet;
+    }
+
+    gOHCIInterruptReady = 1;
+    return kIOReturnSuccess;
+}
+
+void
+EnableOHCIInterruptDispatch()
+{
+    if (gOHCIInterruptSource == nullptr || gOHCIInterruptReady == 0) {
+        gOHCIInterruptEnabled = 0;
+        return;
+    }
+    gOHCIInterruptSource->SetEnableWithCompletion(true, nullptr);
+    gOHCIInterruptEnabled = 1;
+}
+
+void
+DisableOHCIInterruptDispatch()
+{
+    if (gOHCIInterruptSource != nullptr) {
+        gOHCIInterruptSource->SetEnableWithCompletion(false, nullptr);
+    }
+    gOHCIInterruptEnabled = 0;
+}
+
+void
+ReleaseOHCIInterruptDispatch()
+{
+    DisableOHCIInterruptDispatch();
+    OSSafeReleaseNULL(gOHCIInterruptSource);
+    OSSafeReleaseNULL(gOHCIInterruptAction);
+    gOHCIInterruptReady = 0;
+}
+
+void
 PublishAudioRuntimeDiagnostics()
 {
     if (gDriverInstance == nullptr) {
         return;
     }
 
-    OSDictionary * properties = OSDictionary::withCapacity(384);
+    OSDictionary * properties = OSDictionary::withCapacity(448);
     if (properties == nullptr) {
         return;
     }
@@ -1681,6 +1825,52 @@ PublishAudioRuntimeDiagnostics()
     AddNumberProperty(properties, "ProbeAudioRuntimeRefreshCapturePeakAbs", gAudioRefreshCapturePeakAbs, 32);
     AddNumberProperty(properties, "ProbeAudioRuntimeRefreshCaptureRxBytes", gAudioRefreshCaptureRxBytes, 32);
     AddNumberProperty(properties, "ProbeAudioRuntimeRefreshQueueCreateRet", gAudioRefreshQueueCreateRet, 32);
+    AddNumberProperty(properties, "ProbeOHCIInterruptDispatchEnabled", kOHCIInterruptDispatchEnabled, 32);
+    AddNumberProperty(properties, "ProbeOHCIInterruptConfigureRet", gOHCIInterruptConfigureRet, 32);
+    AddNumberProperty(properties, "ProbeOHCIInterruptActionCreateRet", gOHCIInterruptActionCreateRet, 32);
+    AddNumberProperty(properties, "ProbeOHCIInterruptSourceCreateRet", gOHCIInterruptSourceCreateRet, 32);
+    AddNumberProperty(properties, "ProbeOHCIInterruptSetHandlerRet", gOHCIInterruptSetHandlerRet, 32);
+    AddNumberProperty(properties, "ProbeOHCIInterruptReady", gOHCIInterruptReady, 32);
+    AddNumberProperty(properties, "ProbeOHCIInterruptEnabled", gOHCIInterruptEnabled, 32);
+    AddNumberProperty(properties, "ProbeOHCIInterruptUseMSIX", gOHCIInterruptUseMSIX, 32);
+    AddNumberProperty(properties, "ProbeOHCIInterruptCount", gOHCIInterruptCount, 64);
+    AddNumberProperty(properties, "ProbeOHCIInterruptIsoRecvCount", gOHCIInterruptIsoRecvCount, 64);
+    AddNumberProperty(properties, "ProbeOHCIInterruptIsoXmitCount", gOHCIInterruptIsoXmitCount, 64);
+    AddNumberProperty(properties, "ProbeOHCIInterruptOtherCount", gOHCIInterruptOtherCount, 64);
+    AddNumberProperty(properties,
+                      "ProbeOHCIInterruptDigiHarvestAttemptCount",
+                      gOHCIInterruptDigiHarvestAttemptCount,
+                      64);
+    AddNumberProperty(properties,
+                      "ProbeOHCIInterruptDigiHarvestSuccessCount",
+                      gOHCIInterruptDigiHarvestSuccessCount,
+                      64);
+    AddNumberProperty(properties,
+                      "ProbeOHCIInterruptDigiHarvestBusyCount",
+                      gOHCIInterruptDigiHarvestBusyCount,
+                      64);
+    AddNumberProperty(properties,
+                      "ProbeOHCIInterruptDigiHarvestEmptyCount",
+                      gOHCIInterruptDigiHarvestEmptyCount,
+                      64);
+    AddNumberProperty(properties, "ProbeOHCIInterruptLastHarvestRet", gOHCIInterruptLastHarvestRet, 32);
+    AddNumberProperty(properties, "ProbeOHCIInterruptLastIntEvent", gOHCIInterruptLastIntEvent, 32);
+    AddNumberProperty(properties, "ProbeOHCIInterruptLastIsoRecvEvent", gOHCIInterruptLastIsoRecvEvent, 32);
+    AddNumberProperty(properties, "ProbeOHCIInterruptLastIsoXmitEvent", gOHCIInterruptLastIsoXmitEvent, 32);
+    AddNumberProperty(properties,
+                      "ProbeOHCIInterruptLastClearedIntEvent",
+                      gOHCIInterruptLastClearedIntEvent,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeOHCIInterruptLastClearedIsoRecvEvent",
+                      gOHCIInterruptLastClearedIsoRecvEvent,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeOHCIInterruptLastClearedIsoXmitEvent",
+                      gOHCIInterruptLastClearedIsoXmitEvent,
+                      32);
+    AddNumberProperty(properties, "ProbeOHCIInterruptLastCount", gOHCIInterruptLastCount, 64);
+    AddNumberProperty(properties, "ProbeOHCIInterruptLastTime", gOHCIInterruptLastTime, 64);
     AddNumberProperty(properties, "ProbeAudioRuntimeRefreshWorkerDispatchCount", gAudioRefreshWorkerDispatchCount, 32);
     AddNumberProperty(properties, "ProbeAudioRuntimeRefreshWorkerIterationCount", gAudioRefreshWorkerIterationCount, 32);
     AddNumberProperty(properties, "ProbeAudioRuntimeRefreshWorkerExitCount", gAudioRefreshWorkerExitCount, 32);
@@ -1720,6 +1910,7 @@ PublishAudioRuntimeDiagnostics()
     AddNumberProperty(properties, "ProbeDigiLiveStartSuccessCount", gDigiLiveStartSuccessCount, 32);
     AddNumberProperty(properties, "ProbeDigiLiveStopAttemptCount", gDigiLiveStopAttemptCount, 32);
     AddNumberProperty(properties, "ProbeDigiLiveStopSuccessCount", gDigiLiveStopSuccessCount, 32);
+    AddNumberProperty(properties, "ProbeDigiLiveStopDrainWaitLoops", gDigiLiveStopDrainWaitLoops, 32);
     AddNumberProperty(properties, "ProbeDigiLiveRunning", gDigiLiveRunning, 32);
     AddNumberProperty(properties, "ProbeDigiLiveStarting", gDigiLiveStarting, 32);
     AddNumberProperty(properties, "ProbeDigiLiveStopping", gDigiLiveStopping, 32);
@@ -2576,6 +2767,7 @@ ConfigureAudioDevice(FireWireOHCIProbe * driver)
     gAudioRefreshWorkerLivePublishSkipCount = 0;
     gAudioRefreshWorkerBacklogNoSleepCount = 0;
     gAudioRefreshWorkerLowWaterNoSleepCount = 0;
+    ResetOHCIInterruptDiagnostics();
     gAudioInputCallbackHarvestAttemptCount = 0;
     gAudioInputCallbackHarvestSuccessCount = 0;
     gAudioInputCallbackHarvestRet = ReturnCodeToProperty(kIOReturnNotReady);
@@ -2584,6 +2776,7 @@ ConfigureAudioDevice(FireWireOHCIProbe * driver)
     gDigiLiveStartSuccessCount = 0;
     gDigiLiveStopAttemptCount = 0;
     gDigiLiveStopSuccessCount = 0;
+    gDigiLiveStopDrainWaitLoops = 0;
     gDigiLiveRunning = 0;
     gDigiLiveStarting = 0;
     gDigiLiveStopping = 0;
@@ -2719,6 +2912,11 @@ ConfigureAudioDevice(FireWireOHCIProbe * driver)
                                                          kIODispatchQueueReentrant,
                                                          0,
                                                          &gAudioRefreshQueue));
+    }
+    if (kOHCIInterruptDispatchEnabled != 0 &&
+        gAudioRefreshQueueCreateRet == ReturnCodeToProperty(kIOReturnSuccess) &&
+        gPCIDevice != nullptr) {
+        (void)ConfigureOHCIInterruptDispatch(driver, gPCIDevice);
     }
 
     gAudioBufferCreateRet =
@@ -6680,6 +6878,11 @@ StartDigiLiveIsoStream()
         gDigiLiveCompleteRet = ReturnCodeToProperty(CompleteDMABufferMapping(&gDigiLiveBuffer));
         return kIOReturnUnsupported;
     }
+    if (kOHCIInterruptDispatchEnabled != 0 &&
+        gOHCIInterruptReady == 0 &&
+        gDriverInstance != nullptr) {
+        (void)ConfigureOHCIInterruptDispatch(gDriverInstance, gPCIDevice);
+    }
 
     uint64_t itControlSet = OhciIsoXmitContextControlSetOffset(kDigi00xDuplexContextIndex);
     uint64_t itControlClear = OhciIsoXmitContextControlClearOffset(kDigi00xDuplexContextIndex);
@@ -6710,6 +6913,13 @@ StartDigiLiveIsoStream()
     gPCIDevice->MemoryWrite32(gPCIMemoryIndex, irCommandPtrOffset, gDigiLiveIRCommandPtr);
     gPCIDevice->MemoryWrite32(gPCIMemoryIndex, irContextMatchOffset, gDigiLiveIRContextMatch);
 
+    if (kOHCIInterruptDispatchEnabled != 0) {
+        gPCIDevice->MemoryWrite32(gPCIMemoryIndex, kOhciIntMaskClearOffset, 0xffffffff);
+        gPCIDevice->MemoryWrite32(gPCIMemoryIndex, kOhciIntEventClearOffset, 0x7fffffff);
+        gPCIDevice->MemoryWrite32(gPCIMemoryIndex,
+                                  kOhciIntMaskSetOffset,
+                                  kOhciEventMasterIntEnable | kOhciIsochInterruptMask);
+    }
     gPCIDevice->MemoryWrite32(gPCIMemoryIndex, kOhciIsoRecvIntEventClearOffset, contextBit);
     gPCIDevice->MemoryWrite32(gPCIMemoryIndex, kOhciIsoRecvIntMaskSetOffset, contextBit);
     gPCIDevice->MemoryWrite32(gPCIMemoryIndex, irControlSet, kIrContextIsochHeader | kContextRun);
@@ -6730,6 +6940,9 @@ StartDigiLiveIsoStream()
     gDigiLiveReady = 1;
     gDigiLiveRunning = 1;
     gDigiLiveState = kDigiLiveStateRunning;
+    if (kOHCIInterruptDispatchEnabled != 0) {
+        EnableOHCIInterruptDispatch();
+    }
     return kIOReturnSuccess;
 }
 
@@ -7236,10 +7449,10 @@ StopDigiLiveStreamForAudio()
 
     gDigiLiveStopping = 1;
     gDigiLiveState = kDigiLiveStateStopping;
-    PublishAudioRuntimeDiagnostics();
     kern_return_t ret = kIOReturnSuccess;
     gDigiLiveRunning = 0;
     gDigiLiveReady = 0;
+    PublishAudioRuntimeDiagnostics();
 
     if (gPCIDevice != nullptr && gPCIMemoryIndex != 0xff) {
         uint32_t contextBit = 1u << kDigi00xDuplexContextIndex;
@@ -7261,12 +7474,24 @@ StopDigiLiveStreamForAudio()
                     &gDigiLiveIRControlAfterStop);
         gPCIDevice->MemoryWrite32(gPCIMemoryIndex, kOhciIsoXmitIntMaskClearOffset, contextBit);
         gPCIDevice->MemoryWrite32(gPCIMemoryIndex, kOhciIsoRecvIntMaskClearOffset, contextBit);
+        if (kOHCIInterruptDispatchEnabled != 0) {
+            gPCIDevice->MemoryWrite32(gPCIMemoryIndex, kOhciIntMaskClearOffset, 0xffffffff);
+            gPCIDevice->MemoryWrite32(gPCIMemoryIndex, kOhciIntEventClearOffset, 0x7fffffff);
+        }
         gPCIDevice->MemoryRead32(gPCIMemoryIndex, kOhciIsoXmitIntMaskSetOffset, &gDigiLiveITMaskAfterClear);
         gPCIDevice->MemoryRead32(gPCIMemoryIndex, kOhciIsoRecvIntMaskSetOffset, &gDigiLiveIRMaskAfterClear);
     }
 
+    gDigiLiveStopDrainWaitLoops = 0;
+    for (uint32_t i = 0; i < 1000 && gDigiLiveDrainBusy != 0; ++i) {
+        gDigiLiveStopDrainWaitLoops = i + 1;
+        IODelay(10);
+    }
+
     gDigiLiveCompleteRet = ReturnCodeToProperty(CompleteDMABufferMapping(&gDigiLiveBuffer));
     ReleaseDMABuffer(&gDigiLiveBuffer);
+    gDigiLiveRunning = 0;
+    gDigiLiveReady = 0;
     if (ret == kIOReturnSuccess) {
         gDigiLiveStopSuccessCount++;
     }
@@ -9916,11 +10141,84 @@ FireWireOHCIProbe::StopDevice(IOUserAudioObjectID in_object_id,
     return ret;
 }
 
+void
+FireWireOHCIProbe::InterruptOccurred_Impl(FireWireOHCIProbe_InterruptOccurred_Args)
+{
+    (void)action;
+    gOHCIInterruptCount++;
+    gOHCIInterruptLastCount = count;
+    gOHCIInterruptLastTime = time;
+
+    if (gPCIDevice == nullptr || gPCIMemoryIndex == 0xff) {
+        gOHCIInterruptOtherCount++;
+        return;
+    }
+
+    uint32_t intEvent = 0;
+    uint32_t isoRecvEvent = 0;
+    uint32_t isoXmitEvent = 0;
+    gPCIDevice->MemoryRead32(gPCIMemoryIndex, kOhciIntEventSetOffset, &intEvent);
+    gPCIDevice->MemoryRead32(gPCIMemoryIndex, kOhciIsoRecvIntEventSetOffset, &isoRecvEvent);
+    gPCIDevice->MemoryRead32(gPCIMemoryIndex, kOhciIsoXmitIntEventSetOffset, &isoXmitEvent);
+
+    gOHCIInterruptLastIntEvent = intEvent;
+    gOHCIInterruptLastIsoRecvEvent = isoRecvEvent;
+    gOHCIInterruptLastIsoXmitEvent = isoXmitEvent;
+
+    if ((intEvent & kOhciEventIsochRx) != 0 || isoRecvEvent != 0) {
+        gOHCIInterruptIsoRecvCount++;
+    }
+    if ((intEvent & kOhciEventIsochTx) != 0 || isoXmitEvent != 0) {
+        gOHCIInterruptIsoXmitCount++;
+    }
+    if ((intEvent & ~kOhciIsochInterruptMask) != 0) {
+        gOHCIInterruptOtherCount++;
+    }
+
+    uint32_t intClear = intEvent & 0x7fffffffu;
+    if (intClear != 0) {
+        gPCIDevice->MemoryWrite32(gPCIMemoryIndex, kOhciIntEventClearOffset, intClear);
+    }
+    gOHCIInterruptLastClearedIntEvent = intClear;
+
+    uint32_t contextBit = 1u << kDigi00xDuplexContextIndex;
+    bool digiRecvHit = (isoRecvEvent & contextBit) != 0;
+    bool digiRunning =
+        gDigiLiveRunning != 0 && gDigiLiveReady != 0 && gDigiLiveStopping == 0;
+    uint32_t recvClear = digiRunning && digiRecvHit ? (isoRecvEvent & ~contextBit) : isoRecvEvent;
+    uint32_t xmitClear = digiRunning && digiRecvHit ? (isoXmitEvent & ~contextBit) : isoXmitEvent;
+    if (recvClear != 0) {
+        gPCIDevice->MemoryWrite32(gPCIMemoryIndex, kOhciIsoRecvIntEventClearOffset, recvClear);
+    }
+    if (xmitClear != 0) {
+        gPCIDevice->MemoryWrite32(gPCIMemoryIndex, kOhciIsoXmitIntEventClearOffset, xmitClear);
+    }
+    gOHCIInterruptLastClearedIsoRecvEvent = recvClear;
+    gOHCIInterruptLastClearedIsoXmitEvent = xmitClear;
+
+    if (!digiRunning || !digiRecvHit) {
+        return;
+    }
+
+    gOHCIInterruptDigiHarvestAttemptCount++;
+    uint64_t busyBefore = gDigiLiveDrainBusyCount;
+    kern_return_t harvestRet = HarvestDigiLiveIsoStream();
+    gOHCIInterruptLastHarvestRet = ReturnCodeToProperty(harvestRet);
+    if (harvestRet == kIOReturnSuccess) {
+        gOHCIInterruptDigiHarvestSuccessCount++;
+    } else if (harvestRet == kIOReturnBusy || gDigiLiveDrainBusyCount != busyBefore) {
+        gOHCIInterruptDigiHarvestBusyCount++;
+    } else {
+        gOHCIInterruptDigiHarvestEmptyCount++;
+    }
+}
+
 kern_return_t
 IMPL(FireWireOHCIProbe, Stop)
 {
     StopAudioRefreshWorker(true);
     StopDigiLiveStreamForAudio();
+    ReleaseOHCIInterruptDispatch();
     IOPCIDevice * pciDevice = OSDynamicCast(IOPCIDevice, provider);
     if (pciDevice != nullptr) {
         uint8_t memoryIndex = 0xff;

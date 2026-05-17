@@ -3,7 +3,9 @@
 
 #include <Availability.h>
 #include <AudioDriverKit/IOUserAudioDriver.iig>
+#include <DriverKit/IOInterruptDispatchSource.iig>
 #include <DriverKit/IOService.iig>
+#include <DriverKit/OSAction.iig>
 #include <PCIDriverKit/IOPCIDevice.iig>
 
 class FireWireOHCIProbe: public IOUserAudioDriver
@@ -22,6 +24,12 @@ public:
     virtual kern_return_t
     StopDevice(IOUserAudioObjectID in_object_id,
                IOUserAudioStartStopFlags in_flags) override;
+
+    virtual void
+    InterruptOccurred(OSAction * action,
+                      uint64_t count,
+                      uint64_t time)
+        TYPE(IOInterruptDispatchSource::InterruptOccurred);
 
 };
 

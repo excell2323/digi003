@@ -950,12 +950,117 @@ References:
 - https://deepwiki.com/mrmidi/ASFireWire/2.5-isochronous-audio-stack
 - https://deepwiki.com/mrmidi/ASFireWire/5.2-iec-61883-audio-streaming
 
-Next experiment:
+### 0.2.119-0.2.125 DriverKit interrupt harvest experiments
 
-Add a DriverKit `IOInterruptDispatchSource` path for the OHCI device and call the
-Digi RX harvester when the IsoRecv context bit fires. The goal is to move harvest
-cadence closer to the FireWire bus instead of depending primarily on CoreAudio/worker
-polling.
+Added an ASFireWire-style `IOInterruptDispatchSource` scaffold:
+
+```text
+FireWireOHCIProbe::InterruptOccurred()
+IOPCIDevice::ConfigureInterrupts(MSIX, fallback MSI)
+IOInterruptDispatchSource::Create(...)
+OHCI IntEvent/IsoRecv/IsoXmit snapshot diagnostics
+optional Digi harvest when the IsoRecv context bit fires
+```
+
+0.2.119 proved that DriverKit OHCI interrupts can be delivered. It also exposed a
+stop-path bug: disabling the interrupt source during stream stop could leave the
+driver in `stopping`, so the recorder wrote audio but hung before finalizing the WAV
+header. 0.2.120 fixed the stop path by marking the stream not running before teardown
+and waiting briefly for any active harvest before releasing DMA memory.
+
+0.2.121 fixed a second issue: when the interrupt source remained enabled after audio
+stop, the old global diagnostic interrupt mask allowed `cycleSynch` interrupts to
+storm. The fix was to limit the global OHCI mask to isoch events only while the
+interrupt experiment is enabled, and clear the global mask at stop.
+
+Measured results:
+
+```text
+Captures/coreaudio-digi003-test-0.2.119-irq-harvest-10s.wav
+after_1s_repeated_frames=0
+last_5s_repeated_frames=0
+ProbeOHCIInterruptReady=1
+ProbeOHCIInterruptIsoRecvCount=1141
+```
+
+```text
+Captures/coreaudio-digi003-test-0.2.121-irq-maskfix-30s.wav
+repeated_frames=87971
+after_1s_repeated_frames=86656
+last_10s_repeated_frames=47232
+last_5s_repeated_frames=28523
+ProbeOHCIInterruptIsoRecvCount=2618
+ProbeAudioRuntimeRingUnderrunFrames=89046
+```
+
+Callback-off with IRQ still active reduced lock contention but made the long run
+worse:
+
+```text
+Captures/coreaudio-digi003-test-0.2.122-irq-callback-off-30s.wav
+repeated_frames=125093
+after_1s_repeated_frames=117246
+last_10s_repeated_frames=63918
+last_5s_repeated_frames=29529
+ProbeAudioRuntimeInputCallbackHarvestEnabled=0
+ProbeDigiLiveDrainBusyCount=692
+ProbeAudioRuntimeRingUnderrunFrames=91027
+```
+
+IRQ every packet was rejected immediately:
+
+```text
+Captures/coreaudio-digi003-test-0.2.123-irq-every-packet-10s.wav
+repeated_frames=12755
+after_1s_repeated_frames=10568
+last_5s_repeated_frames=10568
+ProbeDigiLiveReceiveIRQInterval=1
+ProbeOHCIInterruptIsoRecvCount=10512
+ProbeAudioRuntimeRingUnderrunFrames=10099
+```
+
+0.2.124/0.2.125 restore the safer polling/callback behavior and keep the interrupt
+scaffold compiled but disabled by default:
+
+```text
+ProbeOHCIInterruptDispatchEnabled=0
+ProbeOHCIInterruptReady=0
+ProbeOHCIInterruptCount=0
+ProbeDigiLiveReceiveIRQInterval=8
+ProbeAudioRuntimeInputCallbackHarvestEnabled=1
+```
+
+0.2.125 control captures:
+
+```text
+Captures/coreaudio-digi003-test-0.2.125-safe-restore-10s.wav
+repeated_frames=4943
+after_1s_repeated_frames=0
+after_2s_repeated_frames=0
+last_5s_repeated_frames=0
+ProbeAudioRuntimeRingUnderrunFrames=0
+```
+
+```text
+Captures/coreaudio-digi003-test-0.2.125-safe-restore-30s.wav
+repeated_frames=99427
+after_1s_repeated_frames=94056
+last_10s_repeated_frames=60008
+last_5s_repeated_frames=33256
+ProbeAudioRuntimeRingUnderrunFrames=89938
+ProbeDigiLiveRxDBCLostCount=24510
+ProbeDigiLiveRxCycleLostCount=24544
+```
+
+Interpretation:
+
+The ASFireWire interrupt model is structurally correct and useful, but directly
+calling the current Digi harvester from the DriverKit interrupt source does not fix
+the 30-second starvation. The IRQ source fires much less usefully than expected at
+the 8-packet interval, while every-packet IRQ creates too much contention/empty work.
+The next fix should not be "more harvest callers"; it should make the single harvest
+path cheaper and more deterministic, or change the ring policy so CoreAudio cannot
+drain below the producer during long active captures.
 
 ## Local Automation Notes
 
@@ -1018,8 +1123,8 @@ monitor source stride                = 8
 
 ## Next Work
 
-1. Add interrupt-driven Digi RX harvest based on OHCI IsoRecv context events.
-2. Reduce RX DBC/cycle lost counts and 30-second underruns.
-3. Keep active-capture underrun diagnostics separate from post-capture ring fill.
+1. Keep `ProbeOHCIInterruptDispatchEnabled=0` until the harvest path is made cheaper.
+2. Reduce RX DBC/cycle lost counts and 30-second underruns without adding harvest callers.
+3. Investigate producer/consumer ring policy: long-run audio repeats match ring starvation even when the device stream remains active.
 4. Add Digi "double-oh-three" playback encoding before enabling non-silent output.
 5. Add MIDI/control-surface and mixer/control support after audio input stability improves.
