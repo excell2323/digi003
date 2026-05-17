@@ -1062,6 +1062,50 @@ The next fix should not be "more harvest callers"; it should make the single har
 path cheaper and more deterministic, or change the ring policy so CoreAudio cannot
 drain below the producer during long active captures.
 
+### 0.2.126-0.2.128 low-water and empty-catchup rejections
+
+To avoid spending more test cycles on already weak directions, two narrow follow-up
+experiments were rejected after 10-second captures only:
+
+```text
+Captures/coreaudio-digi003-test-0.2.126-lowwater-bypass-10s.wav
+after_1s_repeated_frames=6656
+last_5s_repeated_frames=6656
+ProbeDigiLiveIREventLowWaterBypassEnabled=1
+ProbeDigiLiveIREventLowWaterBypassFrames=32768
+ProbeDigiLiveIREventGateBypassCount=5730
+ProbeAudioRuntimeRingUnderrunFrames=7589
+ProbeDigiLiveRxDBCLostCount=11020
+ProbeDigiLiveRxCycleLostCount=11040
+```
+
+```text
+Captures/coreaudio-digi003-test-0.2.127-empty-defer-10s.wav
+after_1s_repeated_frames=2956
+last_5s_repeated_frames=2956
+ProbeDigiLiveIREmptyCatchUpDeferCount=1293
+ProbeAudioRuntimeRingUnderrunFrames=7667
+ProbeDigiLiveRxDBCLostCount=9139
+ProbeDigiLiveRxCycleLostCount=9147
+```
+
+Interpretation:
+
+Low-water event-gate bypass repeats the older 0.2.103 failure mode and should stay
+off. Deferring empty-descriptor catchup while the ring still has reserve also does
+not help; it can leave the callback starved before the worker catches up. 0.2.128
+restores the 0.2.125 runtime behavior with only the bundle version advanced:
+
+```text
+Captures/coreaudio-digi003-test-0.2.128-safe-rollback-10s.wav
+after_1s_repeated_frames=0
+after_2s_repeated_frames=0
+last_5s_repeated_frames=0
+ProbeAudioRuntimeRingUnderrunFrames=0
+ProbeOHCIInterruptDispatchEnabled=0
+ProbeDigiLiveIREventLowWaterBypassEnabled=0
+```
+
 ## Local Automation Notes
 
 A narrow local sudoers rule is installed at `/etc/sudoers.d/firewire-ohci-probe` so Codex can continue DriverKit upgrade loops without repeated password prompts. It permits only:
