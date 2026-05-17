@@ -8,7 +8,7 @@ Current active local version:
 
 - Driver: `com.axelheckert.driver.FireWireOHCIProbe`
 - Host app: `com.axelheckert.FireWireOHCIProbeLoader`
-- Version: `0.2.149/349`
+- Version: `0.2.157/357`
 - Team ID used locally: `7H3ND356AV`
 - Controller: `pci11c1,5901` / IEEE 1394 Open HCI
 
@@ -1714,10 +1714,105 @@ ProbeAudioRuntimeRefreshWorkerActiveCatchUpNoSleepCount
 
 - Robin Gareus, "Reverse engineering the Digidesign 003R protocol": https://gareus.org/wiki/digi003
 - Linux kernel `sound/firewire/digi00x/amdtp-dot.c`: https://codebrowser.dev/linux/linux/sound/firewire/digi00x/amdtp-dot.c.html
+- Linux kernel `sound/firewire/digi00x/digi00x-midi.c`: https://codebrowser.dev/linux/linux/sound/firewire/digi00x/digi00x-midi.c.html
 - Proof-of-concept Digi 003 AMDTP encoder: https://github.com/x42/003amdtp
 - Rust `firewire-digi00x-protocols` crate for async clock, optical, and monitor controls: https://docs.rs/firewire-digi00x-protocols/latest/firewire_digi00x_protocols/
 - ZamAudio note that Linux 5.14 removed Digi 002/003R clicks/pops: https://www.zamaudio.com/?p=2567
 - Linux fix commit `019af5923c8a` ("perform sequence replay for media clock recovery"): https://git.kernel.org/pub/scm/linux/kernel/git/tiwai/sound.git/commit/sound/firewire?h=for-next&id=019af5923c8a46b581fc2f2d670dcc0714a80bf0
+
+## 0.2.150 Slot-0 MIDI/Control Diagnostics
+
+Linux `amdtp-dot.c` treats data-block slot 0 as the Digi00x MIDI/control
+quadlet and starts audio at slot 1. For receive, byte 0 is the marker, bytes 1
+and 2 carry up to two MIDI bytes, and the low nibble of byte 3 is the length.
+The high nibble of byte 3 selects the logical port; Linux maps any non-zero RX
+port nibble to the console/control port.
+
+New diagnostics:
+
+```text
+ProbeDigiLiveMidiMessageCount
+ProbeDigiLiveMidiPhysicalMessageCount
+ProbeDigiLiveMidiConsoleMessageCount
+ProbeDigiLiveMidiInvalidLengthCount
+ProbeDigiLiveMidiLastRawWordBE
+ProbeDigiLiveMidiLastMarker
+ProbeDigiLiveMidiLastData0
+ProbeDigiLiveMidiLastData1
+ProbeDigiLiveMidiLastControl
+ProbeDigiLiveMidiLastPortNibble
+ProbeDigiLiveMidiLastLength
+```
+
+## 0.2.151 Runtime Diagnostics Capacity
+
+Increases the runtime diagnostics dictionary capacity so the slot-0 MIDI/control
+properties are published together with the existing audio and isochronous
+diagnostics.
+
+## 0.2.152 Slot-0 MIDI Message Snapshot
+
+The plain `ProbeDigiLiveMidiLast*` values are overwritten by the idle
+`0x80000000` slot-0 word between real messages. This version keeps the last
+non-empty message and a 16-entry raw-word ring:
+
+```text
+ProbeDigiLiveMidiLastMessage*
+ProbeDigiLiveMidiRecentIndex
+ProbeDigiLiveMidiRecentCount
+ProbeDigiLiveMidiRecentRawWord0BE .. ProbeDigiLiveMidiRecentRawWord15BE
+```
+
+## 0.2.153 Slot-0 Last Message Semantics
+
+Changes the already visible `ProbeDigiLiveMidiLast*` diagnostics to update only
+for non-empty MIDI/control words. The idle `0x80000000` word no longer erases
+the last useful message between console events.
+
+## 0.2.154 Slot-0 Visible Event Snapshot
+
+Changes the early, reliably visible `ProbeDigiLiveSlot0LastLabel` and
+`ProbeDigiLiveSlot0LastValue24` diagnostics to update only for non-empty slot-0
+words. This keeps the last control-surface event visible even if later
+`ProbeDigiLiveMidiLast*` properties are beyond the IORegistry update limit.
+
+## 0.2.155 Slot-0 Event Logging
+
+Logs every non-empty slot-0 MIDI/control word with marker, two data bytes,
+control byte, port nibble, and length. This is used for button/fader mapping
+because IORegistry property publication can hide later diagnostic keys.
+
+## 0.2.156 Separate Control Diagnostics
+
+Publishes a small separate `ProbeControl*` property set whenever a non-empty
+slot-0 MIDI/control word arrives. This avoids the large runtime diagnostics
+dictionary and exposes the raw control word plus a 16-entry recent-word ring for
+button/fader mapping.
+
+## 0.2.157 Early Control Diagnostics In Runtime Publish
+
+Moves the `ProbeControl*` diagnostics to the beginning of the normal runtime
+diagnostics dictionary as well. The runtime publish path is visible after
+CoreAudio start/stop, while direct per-message `SetProperties()` calls from the
+harvest path can be dropped or hidden by DriverKit.
+
+Initial button mapping from the Digi 003 console, using the receive slot-0
+control stream on port nibble `0xe`:
+
+```text
+Control     Press        Release
+SELECT 1    90 00 40     90 00 00
+STOP        90 09 4e     90 09 0e
+PLAY        90 0a 4e     90 0a 0e
+```
+
+Each 3-byte console MIDI message is fragmented over two slot-0 quadlets because
+the Digi00x AMDTP MIDI/control slot carries two MIDI bytes plus a control byte
+per data block:
+
+```text
+90 nn vv  ->  80 90 nn e2, 80 vv 00 e1
+```
 
 ## Async Control Reference
 
@@ -1747,4 +1842,4 @@ monitor source stride                = 8
 2. Reduce RX DBC/cycle lost counts and 30-second underruns without adding harvest callers.
 3. Investigate producer/consumer ring policy: long-run audio repeats match ring starvation even when the device stream remains active.
 4. Test non-silent CoreAudio output with the payload-only path, then reduce output lead packets for latency.
-5. Add MIDI/control-surface and mixer/control support after audio input/output stability improves.
+5. Move from slot-0 MIDI/control diagnostics to a CoreMIDI-facing endpoint once control-surface bytes are confirmed.

@@ -219,6 +219,7 @@ constexpr uint32_t kDigi00xDuplexDataBlockQuadlets = 19;
 constexpr uint32_t kDigi00xDuplexDataBlockBytes =
     kDigi00xDuplexDataBlockQuadlets * sizeof(uint32_t);
 constexpr uint32_t kDigi00xDuplexPCMAudioChannels = 18;
+constexpr uint32_t kDigiLiveMidiRecentMessageCount = 16;
 constexpr uint32_t kDigi00xDuplexCIPSFC44100 = 1;
 constexpr uint32_t kDigi00xCIPDBCMask = 0x000000ff;
 constexpr uint32_t kDigi00xCIPSYTMask = 0x0000ffff;
@@ -1162,6 +1163,28 @@ uint32_t gDigiLiveEmptyPollCount = 0;
 uint32_t gDigiLiveSlot0LastLabel = 0;
 uint32_t gDigiLiveSlot0LastValue24 = 0;
 uint64_t gDigiLiveSlot0NonzeroCount = 0;
+uint64_t gDigiLiveMidiMessageCount = 0;
+uint64_t gDigiLiveMidiPhysicalMessageCount = 0;
+uint64_t gDigiLiveMidiConsoleMessageCount = 0;
+uint64_t gDigiLiveMidiInvalidLengthCount = 0;
+uint32_t gDigiLiveMidiLastRawWordBE = 0;
+uint32_t gDigiLiveMidiLastMarker = 0;
+uint32_t gDigiLiveMidiLastData0 = 0;
+uint32_t gDigiLiveMidiLastData1 = 0;
+uint32_t gDigiLiveMidiLastControl = 0;
+uint32_t gDigiLiveMidiLastPortNibble = 0;
+uint32_t gDigiLiveMidiLastLength = 0;
+uint32_t gDigiLiveMidiLastMessageRawWordBE = 0;
+uint32_t gDigiLiveMidiLastMessageMarker = 0;
+uint32_t gDigiLiveMidiLastMessageData0 = 0;
+uint32_t gDigiLiveMidiLastMessageData1 = 0;
+uint32_t gDigiLiveMidiLastMessageControl = 0;
+uint32_t gDigiLiveMidiLastMessagePortNibble = 0;
+uint32_t gDigiLiveMidiLastMessageLength = 0;
+uint32_t gDigiLiveMidiRecentIndex = 0;
+uint32_t gDigiLiveMidiRecentCount = 0;
+uint32_t gDigiLiveMidiRecentRawWordBE[kDigiLiveMidiRecentMessageCount] = {};
+uint64_t gDigiLiveMidiLoggedMessageCount = 0;
 uint32_t gDigiLiveSyncForDeviceRet = static_cast<uint32_t>(kIOReturnNotReady);
 uint32_t gDigiLiveSyncForCPURet = static_cast<uint32_t>(kIOReturnNotReady);
 uint32_t gDigiLiveCompleteRet = static_cast<uint32_t>(kIOReturnNotReady);
@@ -1455,6 +1478,52 @@ AddIndexedNumberProperty(OSDictionary * properties,
     return AddNumberProperty(properties, key, value, bits);
 }
 
+void
+PublishDigiLiveControlDiagnostics(uint32_t rawWordBE,
+                                  uint32_t marker,
+                                  uint32_t data0,
+                                  uint32_t data1,
+                                  uint32_t control,
+                                  uint32_t portNibble,
+                                  uint32_t length)
+{
+    if (gDriverInstance == nullptr) {
+        return;
+    }
+
+    OSDictionary * properties = OSDictionary::withCapacity(40);
+    if (properties == nullptr) {
+        return;
+    }
+
+    AddNumberProperty(properties, "ProbeControlMessageCount", gDigiLiveMidiMessageCount, 64);
+    AddNumberProperty(properties, "ProbeControlConsoleMessageCount", gDigiLiveMidiConsoleMessageCount, 64);
+    AddNumberProperty(properties, "ProbeControlPhysicalMessageCount", gDigiLiveMidiPhysicalMessageCount, 64);
+    AddNumberProperty(properties, "ProbeControlInvalidLengthCount", gDigiLiveMidiInvalidLengthCount, 64);
+    AddNumberProperty(properties, "ProbeControlLoggedMessageCount", gDigiLiveMidiLoggedMessageCount, 64);
+    AddNumberProperty(properties, "ProbeControlRawWordBE", rawWordBE, 32);
+    AddNumberProperty(properties, "ProbeControlMarker", marker, 32);
+    AddNumberProperty(properties, "ProbeControlData0", data0, 32);
+    AddNumberProperty(properties, "ProbeControlData1", data1, 32);
+    AddNumberProperty(properties, "ProbeControlControl", control, 32);
+    AddNumberProperty(properties, "ProbeControlPortNibble", portNibble, 32);
+    AddNumberProperty(properties, "ProbeControlLength", length, 32);
+    AddNumberProperty(properties, "ProbeControlTimestamp", mach_absolute_time(), 64);
+    AddNumberProperty(properties, "ProbeControlRecentIndex", gDigiLiveMidiRecentIndex, 32);
+    AddNumberProperty(properties, "ProbeControlRecentCount", gDigiLiveMidiRecentCount, 32);
+    for (uint32_t i = 0; i < kDigiLiveMidiRecentMessageCount; ++i) {
+        AddIndexedNumberProperty(properties,
+                                 "ProbeControlRecentRawWord",
+                                 i,
+                                 "BE",
+                                 gDigiLiveMidiRecentRawWordBE[i],
+                                 32);
+    }
+
+    gDriverInstance->SetProperties(properties);
+    properties->release();
+}
+
 uint32_t
 ToBigEndian32(uint32_t value)
 {
@@ -1462,6 +1531,75 @@ ToBigEndian32(uint32_t value)
            ((value & 0x0000ff00u) << 8) |
            ((value & 0x00ff0000u) >> 8) |
            ((value & 0xff000000u) >> 24);
+}
+
+void
+ObserveDigiLiveMidiSlot0(uint32_t slot0WordBE)
+{
+    uint32_t marker = (slot0WordBE >> 24) & 0xffu;
+    uint32_t data0 = (slot0WordBE >> 16) & 0xffu;
+    uint32_t data1 = (slot0WordBE >> 8) & 0xffu;
+    uint32_t control = slot0WordBE & 0xffu;
+    uint32_t length = control & 0x0fu;
+    uint32_t portNibble = (control >> 4) & 0x0fu;
+
+    if (length == 0) {
+        return;
+    }
+
+    gDigiLiveMidiLastRawWordBE = slot0WordBE;
+    gDigiLiveMidiLastMarker = marker;
+    gDigiLiveMidiLastData0 = data0;
+    gDigiLiveMidiLastData1 = data1;
+    gDigiLiveMidiLastControl = control;
+    gDigiLiveMidiLastPortNibble = portNibble;
+    gDigiLiveMidiLastLength = length;
+
+    if (length > 2) {
+        gDigiLiveMidiInvalidLengthCount++;
+        return;
+    }
+
+    gDigiLiveMidiMessageCount++;
+    if (portNibble != 0) {
+        gDigiLiveMidiConsoleMessageCount++;
+    } else {
+        gDigiLiveMidiPhysicalMessageCount++;
+    }
+
+    gDigiLiveMidiLastMessageRawWordBE = slot0WordBE;
+    gDigiLiveMidiLastMessageMarker = marker;
+    gDigiLiveMidiLastMessageData0 = data0;
+    gDigiLiveMidiLastMessageData1 = data1;
+    gDigiLiveMidiLastMessageControl = control;
+    gDigiLiveMidiLastMessagePortNibble = portNibble;
+    gDigiLiveMidiLastMessageLength = length;
+
+    gDigiLiveMidiRecentRawWordBE[gDigiLiveMidiRecentIndex] = slot0WordBE;
+    gDigiLiveMidiRecentIndex =
+        (gDigiLiveMidiRecentIndex + 1) % kDigiLiveMidiRecentMessageCount;
+    if (gDigiLiveMidiRecentCount < kDigiLiveMidiRecentMessageCount) {
+        gDigiLiveMidiRecentCount++;
+    }
+
+    gDigiLiveMidiLoggedMessageCount++;
+    os_log(OS_LOG_DEFAULT,
+           "FireWireOHCIProbe: digi003 slot0 midi/control msg=%llu rawBE=0x%08x marker=0x%02x data0=0x%02x data1=0x%02x control=0x%02x port=0x%x len=%u",
+           gDigiLiveMidiLoggedMessageCount,
+           slot0WordBE,
+           marker,
+           data0,
+           data1,
+           control,
+           portNibble,
+           length);
+    PublishDigiLiveControlDiagnostics(slot0WordBE,
+                                      marker,
+                                      data0,
+                                      data1,
+                                      control,
+                                      portNibble,
+                                      length);
 }
 
 uint8_t
@@ -1996,9 +2134,32 @@ PublishAudioRuntimeDiagnostics()
         return;
     }
 
-    OSDictionary * properties = OSDictionary::withCapacity(448);
+    OSDictionary * properties = OSDictionary::withCapacity(640);
     if (properties == nullptr) {
         return;
+    }
+
+    AddNumberProperty(properties, "ProbeControlMessageCount", gDigiLiveMidiMessageCount, 64);
+    AddNumberProperty(properties, "ProbeControlConsoleMessageCount", gDigiLiveMidiConsoleMessageCount, 64);
+    AddNumberProperty(properties, "ProbeControlPhysicalMessageCount", gDigiLiveMidiPhysicalMessageCount, 64);
+    AddNumberProperty(properties, "ProbeControlInvalidLengthCount", gDigiLiveMidiInvalidLengthCount, 64);
+    AddNumberProperty(properties, "ProbeControlLoggedMessageCount", gDigiLiveMidiLoggedMessageCount, 64);
+    AddNumberProperty(properties, "ProbeControlRawWordBE", gDigiLiveMidiLastRawWordBE, 32);
+    AddNumberProperty(properties, "ProbeControlMarker", gDigiLiveMidiLastMarker, 32);
+    AddNumberProperty(properties, "ProbeControlData0", gDigiLiveMidiLastData0, 32);
+    AddNumberProperty(properties, "ProbeControlData1", gDigiLiveMidiLastData1, 32);
+    AddNumberProperty(properties, "ProbeControlControl", gDigiLiveMidiLastControl, 32);
+    AddNumberProperty(properties, "ProbeControlPortNibble", gDigiLiveMidiLastPortNibble, 32);
+    AddNumberProperty(properties, "ProbeControlLength", gDigiLiveMidiLastLength, 32);
+    AddNumberProperty(properties, "ProbeControlRecentIndex", gDigiLiveMidiRecentIndex, 32);
+    AddNumberProperty(properties, "ProbeControlRecentCount", gDigiLiveMidiRecentCount, 32);
+    for (uint32_t i = 0; i < kDigiLiveMidiRecentMessageCount; ++i) {
+        AddIndexedNumberProperty(properties,
+                                 "ProbeControlRecentRawWord",
+                                 i,
+                                 "BE",
+                                 gDigiLiveMidiRecentRawWordBE[i],
+                                 32);
     }
 
     AddNumberProperty(properties, "ProbeAudioRuntimeStartDeviceCount", gAudioStartDeviceCount, 32);
@@ -2295,6 +2456,55 @@ PublishAudioRuntimeDiagnostics()
     AddNumberProperty(properties, "ProbeDigiLiveSlot0LastLabel", gDigiLiveSlot0LastLabel, 32);
     AddNumberProperty(properties, "ProbeDigiLiveSlot0LastValue24", gDigiLiveSlot0LastValue24, 32);
     AddNumberProperty(properties, "ProbeDigiLiveSlot0NonzeroCount", gDigiLiveSlot0NonzeroCount, 64);
+    AddNumberProperty(properties, "ProbeDigiLiveMidiMessageCount", gDigiLiveMidiMessageCount, 64);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveMidiPhysicalMessageCount",
+                      gDigiLiveMidiPhysicalMessageCount,
+                      64);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveMidiConsoleMessageCount",
+                      gDigiLiveMidiConsoleMessageCount,
+                      64);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveMidiInvalidLengthCount",
+                      gDigiLiveMidiInvalidLengthCount,
+                      64);
+    AddNumberProperty(properties, "ProbeDigiLiveMidiLastRawWordBE", gDigiLiveMidiLastRawWordBE, 32);
+    AddNumberProperty(properties, "ProbeDigiLiveMidiLastMarker", gDigiLiveMidiLastMarker, 32);
+    AddNumberProperty(properties, "ProbeDigiLiveMidiLastData0", gDigiLiveMidiLastData0, 32);
+    AddNumberProperty(properties, "ProbeDigiLiveMidiLastData1", gDigiLiveMidiLastData1, 32);
+    AddNumberProperty(properties, "ProbeDigiLiveMidiLastControl", gDigiLiveMidiLastControl, 32);
+    AddNumberProperty(properties, "ProbeDigiLiveMidiLastPortNibble", gDigiLiveMidiLastPortNibble, 32);
+    AddNumberProperty(properties, "ProbeDigiLiveMidiLastLength", gDigiLiveMidiLastLength, 32);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveMidiLastMessageRawWordBE",
+                      gDigiLiveMidiLastMessageRawWordBE,
+                      32);
+    AddNumberProperty(properties, "ProbeDigiLiveMidiLastMessageMarker", gDigiLiveMidiLastMessageMarker, 32);
+    AddNumberProperty(properties, "ProbeDigiLiveMidiLastMessageData0", gDigiLiveMidiLastMessageData0, 32);
+    AddNumberProperty(properties, "ProbeDigiLiveMidiLastMessageData1", gDigiLiveMidiLastMessageData1, 32);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveMidiLastMessageControl",
+                      gDigiLiveMidiLastMessageControl,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveMidiLastMessagePortNibble",
+                      gDigiLiveMidiLastMessagePortNibble,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveMidiLastMessageLength",
+                      gDigiLiveMidiLastMessageLength,
+                      32);
+    AddNumberProperty(properties, "ProbeDigiLiveMidiRecentIndex", gDigiLiveMidiRecentIndex, 32);
+    AddNumberProperty(properties, "ProbeDigiLiveMidiRecentCount", gDigiLiveMidiRecentCount, 32);
+    for (uint32_t i = 0; i < kDigiLiveMidiRecentMessageCount; ++i) {
+        AddIndexedNumberProperty(properties,
+                                 "ProbeDigiLiveMidiRecentRawWord",
+                                 i,
+                                 "BE",
+                                 gDigiLiveMidiRecentRawWordBE[i],
+                                 32);
+    }
     AddNumberProperty(properties, "ProbeDigiLiveDMACacheInhibitMapping", gDigiLiveBuffer.cacheInhibitMapping, 32);
     AddNumberProperty(properties, "ProbeDigiLiveDMAMappingRet", ReturnCodeToProperty(gDigiLiveBuffer.mappingRet), 32);
     AddNumberProperty(properties, "ProbeDigiLiveDMACPULength", gDigiLiveBuffer.cpuRange.length, 64);
@@ -3375,6 +3585,30 @@ ConfigureAudioDevice(FireWireOHCIProbe * driver)
     gDigiLiveSlot0LastLabel = 0;
     gDigiLiveSlot0LastValue24 = 0;
     gDigiLiveSlot0NonzeroCount = 0;
+    gDigiLiveMidiMessageCount = 0;
+    gDigiLiveMidiPhysicalMessageCount = 0;
+    gDigiLiveMidiConsoleMessageCount = 0;
+    gDigiLiveMidiInvalidLengthCount = 0;
+    gDigiLiveMidiLastRawWordBE = 0;
+    gDigiLiveMidiLastMarker = 0;
+    gDigiLiveMidiLastData0 = 0;
+    gDigiLiveMidiLastData1 = 0;
+    gDigiLiveMidiLastControl = 0;
+    gDigiLiveMidiLastPortNibble = 0;
+    gDigiLiveMidiLastLength = 0;
+    gDigiLiveMidiLastMessageRawWordBE = 0;
+    gDigiLiveMidiLastMessageMarker = 0;
+    gDigiLiveMidiLastMessageData0 = 0;
+    gDigiLiveMidiLastMessageData1 = 0;
+    gDigiLiveMidiLastMessageControl = 0;
+    gDigiLiveMidiLastMessagePortNibble = 0;
+    gDigiLiveMidiLastMessageLength = 0;
+    gDigiLiveMidiRecentIndex = 0;
+    gDigiLiveMidiRecentCount = 0;
+    for (uint32_t i = 0; i < kDigiLiveMidiRecentMessageCount; ++i) {
+        gDigiLiveMidiRecentRawWordBE[i] = 0;
+    }
+    gDigiLiveMidiLoggedMessageCount = 0;
     gDigiLiveSyncForDeviceRet = ReturnCodeToProperty(kIOReturnNotReady);
     gDigiLiveSyncForCPURet = ReturnCodeToProperty(kIOReturnNotReady);
     gDigiLiveCompleteRet = ReturnCodeToProperty(kIOReturnNotReady);
@@ -8456,11 +8690,13 @@ HarvestDigiLiveIsoStream()
                 int32_t samples[kDigi00xDuplexIRCapturePCMChannelCount] = {};
                 uint32_t captureFrame = frameCount;
                 uint32_t slot0WordBE = ToBigEndian32(dataBlock[0]);
-                gDigiLiveSlot0LastLabel = (slot0WordBE >> 24) & 0xffu;
-                gDigiLiveSlot0LastValue24 = slot0WordBE & 0x00ffffffu;
-                if (gDigiLiveSlot0LastValue24 != 0) {
+                uint32_t slot0Value24 = slot0WordBE & 0x00ffffffu;
+                if (slot0Value24 != 0) {
+                    gDigiLiveSlot0LastLabel = (slot0WordBE >> 24) & 0xffu;
+                    gDigiLiveSlot0LastValue24 = slot0Value24;
                     gDigiLiveSlot0NonzeroCount++;
                 }
+                ObserveDigiLiveMidiSlot0(slot0WordBE);
                 for (uint32_t channel = 0; channel < kDigi00xDuplexIRCapturePCMChannelCount; ++channel) {
                     uint32_t wordBE = ToBigEndian32(dataBlock[1 + channel]);
                     uint32_t label = (wordBE >> 24) & 0xffu;
