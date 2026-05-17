@@ -114,6 +114,11 @@ def state_summary(text):
         "unknown": parse_number(text, "ProbeControlStateUnknownMessageCount"),
         "feedback": parse_number(text, "ProbeControlFeedbackMessageCount"),
         "drops": parse_number(text, "ProbeControlEchoDropCount"),
+        "motor_triggers": parse_number(text, "ProbeControlMotorTestTriggerCount"),
+        "motor_messages": parse_number(text, "ProbeControlMotorTestMessageCount"),
+        "motor_skips": parse_number(text, "ProbeControlMotorTestSkippedCount"),
+        "motor_channel": parse_number(text, "ProbeControlMotorTestLastChannel", 0xFFFFFFFF),
+        "motor_target": parse_number(text, "ProbeControlMotorTestLastTarget10"),
     }
     channel_parts = []
     for channel in range(1, 9):
@@ -130,12 +135,17 @@ def state_summary(text):
             )
     last_channel = values["last_channel"]
     last_channel_text = "-" if last_channel == 0xFFFFFFFF else str(last_channel + 1)
+    motor_channel = values["motor_channel"]
+    motor_channel_text = "-" if motor_channel == 0xFFFFFFFF else str(motor_channel + 1)
     return (
         f"state sel1={values['sel1']} f1touch={values['f1touch']} "
         f"f1cc=0x{values['f1cc']:02X} f1val={values['f1val']} "
         f"f1updates={values['f1updates']} stop={values['stop']} play={values['play']} "
         f"last_ch={last_channel_text} mapped={values['mapped']} unknown={values['unknown']} "
-        f"feedback={values['feedback']} drops={values['drops']}"
+        f"feedback={values['feedback']} drops={values['drops']} "
+        f"motor={values['motor_triggers']}/{values['motor_messages']}/"
+        f"{values['motor_skips']} last_motor_ch={motor_channel_text} "
+        f"target10={values['motor_target']}"
         + ("" if not channel_parts else " | " + " ".join(channel_parts))
     )
 

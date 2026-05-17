@@ -1953,6 +1953,39 @@ Live test results:
   `ProbeAudioRuntimeOutputRingOverrunFrames=0`, and
   `ProbeDigiLiveOutputCursorCatchUpCount=0`.
 
+## 0.2.164 Targeted Motor-Fader Probe
+
+Adds a cautious motor-fader probe on the internal Digi 003 slot-0 MIDI/control
+path. This is not a CoreMIDI endpoint yet; it sends Digi control messages
+directly through the same output slot-0 path used for LED/fader feedback.
+
+Trigger:
+
+```text
+hold PLAY + press SELECT on channel N
+```
+
+The selected channel's motor fader alternates between two safe target positions:
+25% (`target10=256`) and 75% (`target10=768`). The target is encoded as a
+10-bit fader position:
+
+```text
+coarse value = target10 >> 3
+cc           = ((target10 & 0x07) << 3) | channel_index
+message      = B0 cc coarse
+```
+
+Live test results:
+
+- PLAY + SELECT 1 moved fader 1, alternating `target10=768` and `target10=256`.
+- PLAY + SELECT 8 moved fader 8, confirming the 8-channel address formula.
+- The live run queued `6` motor-test messages with `0` skipped messages,
+  `0` feedback drops, and an empty feedback queue after transmit.
+- Audio output counters stayed clean:
+  `ProbeAudioRuntimeOutputRingUnderrunFrames=0`,
+  `ProbeAudioRuntimeOutputRingOverrunFrames=0`, and
+  `ProbeDigiLiveOutputCursorCatchUpCount=0`.
+
 ## Async Control Reference
 
 The Rust `firewire-digi00x-protocols` crate is supplemental runtime code for internal functions outside the isochronous packet stream. It is useful for later mixer/control-surface work, but it does not solve the current live RX harvest issue.

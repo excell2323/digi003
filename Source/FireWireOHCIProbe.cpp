@@ -246,6 +246,9 @@ constexpr uint32_t kDigiLiveControlNoteChannelMute = 0x02;
 constexpr uint32_t kDigiLiveControlNoteChannelFaderTouch = 0x03;
 constexpr uint32_t kDigiLiveControlNoteStop = 0x09;
 constexpr uint32_t kDigiLiveControlNotePlay = 0x0a;
+constexpr uint32_t kDigiLiveControlMotorTestEnabled = 1;
+constexpr uint32_t kDigiLiveControlMotorTestLowTarget10 = 256;
+constexpr uint32_t kDigiLiveControlMotorTestHighTarget10 = 768;
 constexpr uint32_t kDigi00xDuplexCIPSFC44100 = 1;
 constexpr uint32_t kDigi00xCIPDBCMask = 0x000000ff;
 constexpr uint32_t kDigi00xCIPSYTMask = 0x0000ffff;
@@ -1238,6 +1241,7 @@ uint32_t gDigiLiveControlChannelFaderTouched[kDigiLiveControlChannelStripCount] 
 uint32_t gDigiLiveControlChannelFaderControlNumber[kDigiLiveControlChannelStripCount] = {};
 uint32_t gDigiLiveControlChannelFaderValue[kDigiLiveControlChannelStripCount] = {};
 uint64_t gDigiLiveControlChannelFaderUpdateCount[kDigiLiveControlChannelStripCount] = {};
+uint32_t gDigiLiveControlMotorTestToggle[kDigiLiveControlChannelStripCount] = {};
 uint32_t gDigiLiveControlSelect1Pressed = 0;
 uint32_t gDigiLiveControlFader1Touched = 0;
 uint32_t gDigiLiveControlFader1ControlNumber = 0;
@@ -1245,6 +1249,13 @@ uint32_t gDigiLiveControlFader1Value = 0;
 uint64_t gDigiLiveControlFader1UpdateCount = 0;
 uint32_t gDigiLiveControlStopPressed = 0;
 uint32_t gDigiLiveControlPlayPressed = 0;
+uint64_t gDigiLiveControlMotorTestTriggerCount = 0;
+uint64_t gDigiLiveControlMotorTestMessageCount = 0;
+uint64_t gDigiLiveControlMotorTestSkippedCount = 0;
+uint32_t gDigiLiveControlMotorTestLastChannel = 0xffffffff;
+uint32_t gDigiLiveControlMotorTestLastTarget10 = 0;
+uint32_t gDigiLiveControlMotorTestLastCC = 0;
+uint32_t gDigiLiveControlMotorTestLastValue = 0;
 uint64_t gDigiLiveMidiLoggedMessageCount = 0;
 uint32_t gDigiLiveMidiEchoQueueBusy = 0;
 uint32_t gDigiLiveMidiEchoReadIndex = 0;
@@ -1619,6 +1630,32 @@ PublishDigiLiveControlDiagnostics(uint32_t rawWordBE,
                       64);
     AddNumberProperty(properties, "ProbeControlStateStopPressed", gDigiLiveControlStopPressed, 32);
     AddNumberProperty(properties, "ProbeControlStatePlayPressed", gDigiLiveControlPlayPressed, 32);
+    AddNumberProperty(properties, "ProbeControlMotorTestEnabled", kDigiLiveControlMotorTestEnabled, 32);
+    AddNumberProperty(properties,
+                      "ProbeControlMotorTestTriggerCount",
+                      gDigiLiveControlMotorTestTriggerCount,
+                      64);
+    AddNumberProperty(properties,
+                      "ProbeControlMotorTestMessageCount",
+                      gDigiLiveControlMotorTestMessageCount,
+                      64);
+    AddNumberProperty(properties,
+                      "ProbeControlMotorTestSkippedCount",
+                      gDigiLiveControlMotorTestSkippedCount,
+                      64);
+    AddNumberProperty(properties,
+                      "ProbeControlMotorTestLastChannel",
+                      gDigiLiveControlMotorTestLastChannel,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeControlMotorTestLastTarget10",
+                      gDigiLiveControlMotorTestLastTarget10,
+                      32);
+    AddNumberProperty(properties, "ProbeControlMotorTestLastCC", gDigiLiveControlMotorTestLastCC, 32);
+    AddNumberProperty(properties,
+                      "ProbeControlMotorTestLastValue",
+                      gDigiLiveControlMotorTestLastValue,
+                      32);
     for (uint32_t i = 0; i < kDigiLiveControlChannelStripCount; ++i) {
         uint32_t channel = i + 1;
         AddIndexedNumberProperty(properties,
@@ -1724,11 +1761,14 @@ ToBigEndian32(uint32_t value)
            ((value & 0xff000000u) >> 24);
 }
 
-void
+bool
 QueueDigiLiveDecodedMidiFeedback(uint32_t portNibble,
                                  uint8_t status,
                                  uint8_t data1,
                                  uint8_t data2);
+
+bool
+QueueDigiLiveFaderMotorTarget(uint32_t channel, uint32_t target10);
 
 void
 ObserveDigiLiveMappedControlState(uint32_t portNibble,
@@ -1754,6 +1794,19 @@ ObserveDigiLiveMappedControlState(uint32_t portNibble,
             gDigiLiveControlLastMappedChannel = channel;
             if (channel == 0) {
                 gDigiLiveControlSelect1Pressed = pressed;
+            }
+            if (kDigiLiveControlMotorTestEnabled != 0 &&
+                pressed != 0 &&
+                gDigiLiveControlPlayPressed != 0) {
+                gDigiLiveControlMotorTestTriggerCount++;
+                uint32_t target10 = gDigiLiveControlMotorTestToggle[channel] == 0 ?
+                    kDigiLiveControlMotorTestHighTarget10 :
+                    kDigiLiveControlMotorTestLowTarget10;
+                gDigiLiveControlMotorTestToggle[channel] =
+                    gDigiLiveControlMotorTestToggle[channel] == 0 ? 1u : 0u;
+                if (!QueueDigiLiveFaderMotorTarget(channel, target10)) {
+                    gDigiLiveControlMotorTestSkippedCount++;
+                }
             }
             mapped = true;
         } else if (data1 == kDigiLiveControlNoteChannelSolo &&
@@ -1849,7 +1902,7 @@ ObserveDigiLiveDecodedMidiMessage(uint32_t portNibble,
     }
 
     ObserveDigiLiveMappedControlState(portNibble, status, data1, data2);
-    QueueDigiLiveDecodedMidiFeedback(portNibble, status, data1, data2);
+    (void)QueueDigiLiveDecodedMidiFeedback(portNibble, status, data1, data2);
 }
 
 void
@@ -1955,24 +2008,24 @@ AppendDigiLiveMidiEchoWordBE(uint32_t wordBE)
     return AppendDigiLiveMidiEchoWordsBE(&wordBE, 1);
 }
 
-void
+bool
 QueueDigiLiveDecodedMidiFeedback(uint32_t portNibble,
                                  uint8_t status,
                                  uint8_t data1,
                                  uint8_t data2)
 {
     if (kDigiLiveMidiDecodedFeedbackEnabled == 0) {
-        return;
+        return false;
     }
     if (portNibble != kDigiLiveMidiControlPortNibble) {
         gDigiLiveMidiFeedbackSkippedCount++;
-        return;
+        return false;
     }
 
     uint8_t command = static_cast<uint8_t>(status & 0xf0u);
     if (command != 0x80u && command != 0x90u && command != 0xb0u) {
         gDigiLiveMidiFeedbackSkippedCount++;
-        return;
+        return false;
     }
 
     uint32_t controlLength2 = ((portNibble & 0x0fu) << 4) | 0x02u;
@@ -1989,9 +2042,37 @@ QueueDigiLiveDecodedMidiFeedback(uint32_t portNibble,
 
     if (AppendDigiLiveMidiEchoWordsBE(words, 2)) {
         gDigiLiveMidiFeedbackMessageCount++;
+        return true;
     } else {
         gDigiLiveMidiFeedbackSkippedCount++;
+        return false;
     }
+}
+
+bool
+QueueDigiLiveFaderMotorTarget(uint32_t channel, uint32_t target10)
+{
+    if (channel >= kDigiLiveControlChannelStripCount) {
+        return false;
+    }
+    if (target10 > 1023u) {
+        target10 = 1023u;
+    }
+
+    uint8_t coarse = static_cast<uint8_t>((target10 >> 3) & 0x7fu);
+    uint8_t cc = static_cast<uint8_t>(((target10 & 0x07u) << 3) | (channel & 0x07u));
+    bool queued = QueueDigiLiveDecodedMidiFeedback(kDigiLiveMidiControlPortNibble,
+                                                   0xb0u,
+                                                   cc,
+                                                   coarse);
+    if (queued) {
+        gDigiLiveControlMotorTestMessageCount++;
+        gDigiLiveControlMotorTestLastChannel = channel;
+        gDigiLiveControlMotorTestLastTarget10 = target10;
+        gDigiLiveControlMotorTestLastCC = cc;
+        gDigiLiveControlMotorTestLastValue = coarse;
+    }
+    return queued;
 }
 
 uint32_t
@@ -2679,6 +2760,32 @@ PublishAudioRuntimeDiagnostics()
                       64);
     AddNumberProperty(properties, "ProbeControlStateStopPressed", gDigiLiveControlStopPressed, 32);
     AddNumberProperty(properties, "ProbeControlStatePlayPressed", gDigiLiveControlPlayPressed, 32);
+    AddNumberProperty(properties, "ProbeControlMotorTestEnabled", kDigiLiveControlMotorTestEnabled, 32);
+    AddNumberProperty(properties,
+                      "ProbeControlMotorTestTriggerCount",
+                      gDigiLiveControlMotorTestTriggerCount,
+                      64);
+    AddNumberProperty(properties,
+                      "ProbeControlMotorTestMessageCount",
+                      gDigiLiveControlMotorTestMessageCount,
+                      64);
+    AddNumberProperty(properties,
+                      "ProbeControlMotorTestSkippedCount",
+                      gDigiLiveControlMotorTestSkippedCount,
+                      64);
+    AddNumberProperty(properties,
+                      "ProbeControlMotorTestLastChannel",
+                      gDigiLiveControlMotorTestLastChannel,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeControlMotorTestLastTarget10",
+                      gDigiLiveControlMotorTestLastTarget10,
+                      32);
+    AddNumberProperty(properties, "ProbeControlMotorTestLastCC", gDigiLiveControlMotorTestLastCC, 32);
+    AddNumberProperty(properties,
+                      "ProbeControlMotorTestLastValue",
+                      gDigiLiveControlMotorTestLastValue,
+                      32);
     for (uint32_t i = 0; i < kDigiLiveControlChannelStripCount; ++i) {
         uint32_t channel = i + 1;
         AddIndexedNumberProperty(properties,
@@ -4252,6 +4359,7 @@ ConfigureAudioDevice(FireWireOHCIProbe * driver)
         gDigiLiveControlChannelFaderControlNumber[i] = 0;
         gDigiLiveControlChannelFaderValue[i] = 0;
         gDigiLiveControlChannelFaderUpdateCount[i] = 0;
+        gDigiLiveControlMotorTestToggle[i] = 0;
     }
     gDigiLiveControlSelect1Pressed = 0;
     gDigiLiveControlFader1Touched = 0;
@@ -4260,6 +4368,13 @@ ConfigureAudioDevice(FireWireOHCIProbe * driver)
     gDigiLiveControlFader1UpdateCount = 0;
     gDigiLiveControlStopPressed = 0;
     gDigiLiveControlPlayPressed = 0;
+    gDigiLiveControlMotorTestTriggerCount = 0;
+    gDigiLiveControlMotorTestMessageCount = 0;
+    gDigiLiveControlMotorTestSkippedCount = 0;
+    gDigiLiveControlMotorTestLastChannel = 0xffffffff;
+    gDigiLiveControlMotorTestLastTarget10 = 0;
+    gDigiLiveControlMotorTestLastCC = 0;
+    gDigiLiveControlMotorTestLastValue = 0;
     gDigiLiveMidiLoggedMessageCount = 0;
     gDigiLiveMidiEchoQueueBusy = 0;
     gDigiLiveMidiEchoReadIndex = 0;
