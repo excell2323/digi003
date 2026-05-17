@@ -8,7 +8,7 @@ Current active local version:
 
 - Driver: `com.axelheckert.driver.FireWireOHCIProbe`
 - Host app: `com.axelheckert.FireWireOHCIProbeLoader`
-- Version: `0.2.133/333`
+- Version: `0.2.135/335`
 - Team ID used locally: `7H3ND356AV`
 - Controller: `pci11c1,5901` / IEEE 1394 Open HCI
 
@@ -1247,6 +1247,50 @@ are no longer the immediate blocker in dry-run. The next risk to solve before
 enabling live descriptor rewrites is the long-run input harvest starvation:
 around 20-30 seconds the Core Audio ring can drain to near-empty even while the
 replay dry-run is otherwise progressing.
+
+`0.2.134` briefly disabled dry-run to perform live TX descriptor updates with the
+phase-aligned moving replay path. Reject this build: even five successful live
+updates were enough to silence the input capture completely after a Digi 003
+power-cycle.
+
+```text
+Captures/coreaudio-digi003-test-0.2.134-moving-live-10s.wav
+nonzero_frames=0
+repeated_frames=440999
+after_1s_repeated_frames=396899
+last_5s_repeated_frames=220499
+ProbeAudioRuntimeRingUnderrunFrames=319185
+ProbeDigiLiveSequenceReplayMovingDryRunEnabled=0
+ProbeDigiLiveSequenceReplayMovingUpdateSuccessCount=5
+ProbeDigiLiveSequenceReplayMovingUpdatePacketCount=400
+ProbeDigiLiveSequenceReplayMovingBadCommandPtrCount=1015
+ProbeDigiLiveSequenceReplayMovingLastSyncRet=3758097112
+```
+
+Interpretation:
+
+Do not enable live TX descriptor rewrites again until the update window is made
+hardware-pointer safe. The likely issue is not the synthetic 5/6 cadence itself
+but writing descriptors too near the active IT command pointer or presenting a
+transiently inconsistent descriptor/header/payload state. `0.2.135` restores
+dry-run mode with the same phase diagnostics.
+
+`0.2.135` restore test after the rejected live write build:
+
+```text
+Captures/coreaudio-digi003-test-0.2.135-dryrun-restore-10s.wav
+after_1s_repeated_frames=0
+after_2s_repeated_frames=0
+last_5s_repeated_frames=0
+ProbeAudioRuntimeRingUnderrunFrames=0
+ProbeDigiLiveSequenceReplayMovingDryRunEnabled=1
+ProbeDigiLiveSequenceReplayMovingUpdateSuccessCount=0
+ProbeDigiLiveSequenceReplayMovingDryRunSuccessCount=708
+ProbeDigiLiveSequenceReplayMovingDryRunPacketCount=56640
+ProbeDigiLiveSequenceReplayMovingCadencePhaseUseCount=708
+ProbeDigiLiveSequenceReplayMovingBadTotalCount=0
+ProbeDigiLiveSequenceReplayMovingBadCommandPtrCount=0
+```
 
 ## Local Automation Notes
 
