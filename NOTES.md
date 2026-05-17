@@ -2029,6 +2029,9 @@ Live safety test results:
   motor-fader probe did not trigger (`motor=0/0/0`).
 - Fader 7 stayed still during the Shuttle test, confirming the previous
   movement was caused by echoing the Shuttle CC back to the console.
+- A full transport/navigation pass mapped RTZ, REW, FFWD, STOP, PLAY, REC,
+  Arrow Left, Arrow Right, Arrow Up, and Arrow Down with `0` unknown messages
+  and `0` feedback drops.
 
 ## Async Control Reference
 
