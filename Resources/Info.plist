@@ -15,13 +15,13 @@
     <key>CFBundlePackageType</key>
     <string>DEXT</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.2.51</string>
+	<string>0.2.55</string>
     <key>CFBundleSupportedPlatforms</key>
     <array>
         <string>DriverKit</string>
     </array>
 	<key>CFBundleVersion</key>
-	<string>251</string>
+	<string>255</string>
     <key>IOKitPersonalities</key>
     <dict>
         <key>FireWireOHCIProbe</key>

@@ -220,6 +220,9 @@ constexpr uint32_t kDigi00xDuplexITDescriptorOffset = 0x160000;
 // 20480 packets are 256 full 44.1 kHz cadence periods: phase and DBC both wrap cleanly.
 constexpr uint32_t kDigi00xDuplexITPacketCount = 20480;
 constexpr uint32_t kDigi00xDuplexITDescriptorsPerPacket = 4;
+constexpr uint32_t kDigiLiveITMaxDataBlocksPerPacket = 6;
+constexpr uint32_t kDigiLiveITPayloadStrideBytes =
+    kDigiLiveITMaxDataBlocksPerPacket * kDigi00xDuplexDataBlockBytes;
 constexpr uint32_t kDigi00xDuplexIRDescriptorOffset = 0;
 constexpr uint32_t kDigi00xDuplexIRDescriptorCount = 2048;
 constexpr uint32_t kDigi00xDuplexIRDescriptorsPerPacketStorage = 3;
@@ -270,6 +273,8 @@ constexpr uint32_t kDigiLiveIREventPollingEnabled = 1;
 constexpr uint32_t kDigiLiveWorkerLowWaterFrames = 0;
 constexpr uint32_t kDigiLivePrebufferTargetFrames = 8192;
 constexpr uint32_t kDigiLivePrebufferAttemptCount = 300;
+constexpr uint32_t kDigiLiveSequenceReplayEnabled = 1;
+constexpr uint32_t kDigiLiveSequenceReplayPeriodPackets = 80;
 constexpr uint32_t kDigiLiveStateStopped = 0;
 constexpr uint32_t kDigiLiveStateStarting = 1;
 constexpr uint32_t kDigiLiveStateRunning = 2;
@@ -1072,6 +1077,20 @@ uint64_t gDigiLiveRxSYTNoInfoCount = 0;
 uint64_t gDigiLiveRxSYTZeroCount = 0;
 uint64_t gDigiLiveRxDataBlockHistogram[9] = {};
 uint64_t gDigiLiveRxUnexpectedDataBlockCount = 0;
+uint8_t gDigiLiveSequenceReplayPeriod[kDigiLiveSequenceReplayPeriodPackets] = {};
+uint32_t gDigiLiveSequenceReplayPeriodCount = 0;
+uint32_t gDigiLiveSequenceReplayReady = 0;
+uint32_t gDigiLiveSequenceReplayActive = 0;
+uint32_t gDigiLiveSequenceReplayApplyAttemptCount = 0;
+uint32_t gDigiLiveSequenceReplayApplySuccessCount = 0;
+uint32_t gDigiLiveSequenceReplayApplyRet = static_cast<uint32_t>(kIOReturnNotReady);
+uint32_t gDigiLiveSequenceReplayResetCount = 0;
+uint32_t gDigiLiveSequenceReplayInvalidCount = 0;
+uint32_t gDigiLiveSequenceReplayDiscontinuityCount = 0;
+uint32_t gDigiLiveSequenceReplayObservedTotalDataBlocks = 0;
+uint32_t gDigiLiveSequenceReplayIdealMismatchCount = 0;
+uint32_t gDigiLiveSequenceReplayFirstDataBlocks = 0;
+uint32_t gDigiLiveSequenceReplayLastDataBlocks = 0;
 uint32_t gAudioInputCallbackCount = 0;
 uint32_t gAudioInputLastBufferFrameSize = 0;
 uint64_t gAudioInputLastSampleTime = 0;
@@ -1433,6 +1452,61 @@ PublishAudioRuntimeDiagnostics()
                       "ProbeDigiLivePrebufferTargetFrames",
                       kDigiLivePrebufferTargetFrames,
                       32);
+    AddNumberProperty(properties, "ProbeDigiLiveSequenceReplayEnabled", kDigiLiveSequenceReplayEnabled, 32);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveSequenceReplayPeriodPackets",
+                      kDigiLiveSequenceReplayPeriodPackets,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveSequenceReplayPeriodCount",
+                      gDigiLiveSequenceReplayPeriodCount,
+                      32);
+    AddNumberProperty(properties, "ProbeDigiLiveSequenceReplayReady", gDigiLiveSequenceReplayReady, 32);
+    AddNumberProperty(properties, "ProbeDigiLiveSequenceReplayActive", gDigiLiveSequenceReplayActive, 32);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveSequenceReplayApplyAttemptCount",
+                      gDigiLiveSequenceReplayApplyAttemptCount,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveSequenceReplayApplySuccessCount",
+                      gDigiLiveSequenceReplayApplySuccessCount,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveSequenceReplayApplyRet",
+                      gDigiLiveSequenceReplayApplyRet,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveSequenceReplayResetCount",
+                      gDigiLiveSequenceReplayResetCount,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveSequenceReplayInvalidCount",
+                      gDigiLiveSequenceReplayInvalidCount,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveSequenceReplayDiscontinuityCount",
+                      gDigiLiveSequenceReplayDiscontinuityCount,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveSequenceReplayObservedTotalDataBlocks",
+                      gDigiLiveSequenceReplayObservedTotalDataBlocks,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveSequenceReplayIdealMismatchCount",
+                      gDigiLiveSequenceReplayIdealMismatchCount,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveSequenceReplayFirstDataBlocks",
+                      gDigiLiveSequenceReplayFirstDataBlocks,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveSequenceReplayLastDataBlocks",
+                      gDigiLiveSequenceReplayLastDataBlocks,
+                      32);
+    AddDataProperty(properties,
+                    "ProbeDigiLiveSequenceReplayPeriod",
+                    gDigiLiveSequenceReplayPeriod,
+                    sizeof(gDigiLiveSequenceReplayPeriod));
     AddNumberProperty(properties, "ProbeDigiLiveITEventPollCount", gDigiLiveITEventPollCount, 64);
     AddNumberProperty(properties, "ProbeDigiLiveITEventHitCount", gDigiLiveITEventHitCount, 64);
     AddNumberProperty(properties, "ProbeDigiLiveITEventMissCount", gDigiLiveITEventMissCount, 64);
@@ -3724,6 +3798,87 @@ Digi00xDuplexDataBlocksForPacket(uint32_t packetIndex)
 }
 
 void
+ResetDigiLiveSequenceReplayState()
+{
+    for (uint32_t i = 0; i < kDigiLiveSequenceReplayPeriodPackets; ++i) {
+        gDigiLiveSequenceReplayPeriod[i] = 0;
+    }
+    gDigiLiveSequenceReplayPeriodCount = 0;
+    gDigiLiveSequenceReplayReady = 0;
+    gDigiLiveSequenceReplayActive = 0;
+    gDigiLiveSequenceReplayApplyAttemptCount = 0;
+    gDigiLiveSequenceReplayApplySuccessCount = 0;
+    gDigiLiveSequenceReplayApplyRet = ReturnCodeToProperty(kIOReturnNotReady);
+    gDigiLiveSequenceReplayResetCount = 0;
+    gDigiLiveSequenceReplayInvalidCount = 0;
+    gDigiLiveSequenceReplayDiscontinuityCount = 0;
+    gDigiLiveSequenceReplayObservedTotalDataBlocks = 0;
+    gDigiLiveSequenceReplayIdealMismatchCount = 0;
+    gDigiLiveSequenceReplayFirstDataBlocks = 0;
+    gDigiLiveSequenceReplayLastDataBlocks = 0;
+}
+
+void
+RecordDigiLiveSequenceReplayPacket(uint32_t dataBlocks, bool continuous)
+{
+    if (kDigiLiveSequenceReplayEnabled == 0 ||
+        gDigiLiveSequenceReplayReady != 0 ||
+        gDigiLiveSequenceReplayActive != 0) {
+        return;
+    }
+
+    if (dataBlocks != 5 && dataBlocks != 6) {
+        gDigiLiveSequenceReplayInvalidCount++;
+        if (gDigiLiveSequenceReplayPeriodCount != 0) {
+            gDigiLiveSequenceReplayResetCount++;
+        }
+        gDigiLiveSequenceReplayPeriodCount = 0;
+        gDigiLiveSequenceReplayObservedTotalDataBlocks = 0;
+        return;
+    }
+
+    if (!continuous) {
+        gDigiLiveSequenceReplayDiscontinuityCount++;
+        if (gDigiLiveSequenceReplayPeriodCount != 0) {
+            gDigiLiveSequenceReplayResetCount++;
+        }
+        gDigiLiveSequenceReplayPeriodCount = 0;
+        gDigiLiveSequenceReplayObservedTotalDataBlocks = 0;
+        return;
+    }
+
+    uint32_t index = gDigiLiveSequenceReplayPeriodCount;
+    gDigiLiveSequenceReplayPeriod[index] = static_cast<uint8_t>(dataBlocks);
+    gDigiLiveSequenceReplayObservedTotalDataBlocks += dataBlocks;
+    if (index == 0) {
+        gDigiLiveSequenceReplayFirstDataBlocks = dataBlocks;
+    }
+    gDigiLiveSequenceReplayLastDataBlocks = dataBlocks;
+    if (dataBlocks != Digi00xDuplexDataBlocksForPacket(index)) {
+        gDigiLiveSequenceReplayIdealMismatchCount++;
+    }
+
+    gDigiLiveSequenceReplayPeriodCount++;
+    if (gDigiLiveSequenceReplayPeriodCount >= kDigiLiveSequenceReplayPeriodPackets) {
+        gDigiLiveSequenceReplayReady = 1;
+    }
+}
+
+uint32_t
+DigiLiveTransmitDataBlocksForPacket(uint32_t packetIndex,
+                                    const uint8_t * replayPeriod,
+                                    uint32_t replayPeriodCount)
+{
+    if (replayPeriod != nullptr && replayPeriodCount != 0) {
+        uint32_t dataBlocks = replayPeriod[packetIndex % replayPeriodCount];
+        if (dataBlocks == 5 || dataBlocks == 6) {
+            return dataBlocks;
+        }
+    }
+    return Digi00xDuplexDataBlocksForPacket(packetIndex);
+}
+
+void
 RunDigiDuplexIsoProbe(IOPCIDevice * pciDevice, uint8_t memoryIndex, DigiDuplexDiagnostics * diagnostics)
 {
     diagnostics->isoAttempted = 1;
@@ -4986,20 +5141,22 @@ ConfigureDigiLiveTransmitDescriptors(volatile OHCIAsyncDescriptor * itDescriptor
                                      uint32_t itPayloadDMA,
                                      volatile uint32_t * itHeaderStorage,
                                      volatile uint32_t * itPayloadStorage,
-                                     uint32_t sourceNodeIDField)
+                                     uint32_t sourceNodeIDField,
+                                     const uint8_t * replayPeriod,
+                                     uint32_t replayPeriodCount)
 {
     uint32_t dataBlockCounter = 0;
-    uint32_t payloadByteOffset = 0;
     for (uint32_t packet = 0; packet < kDigi00xDuplexITPacketCount; ++packet) {
         volatile OHCIAsyncDescriptor * packetDescriptor =
             itDescriptor + (packet * kDigi00xDuplexITDescriptorsPerPacket);
         uint32_t packetDescriptorDMA =
             itDescriptorDMA + packet * kDigi00xDuplexITDescriptorsPerPacket * sizeof(OHCIAsyncDescriptor);
-        uint32_t dataBlocks = Digi00xDuplexDataBlocksForPacket(packet);
+        uint32_t dataBlocks =
+            DigiLiveTransmitDataBlocksForPacket(packet, replayPeriod, replayPeriodCount);
         uint32_t payloadLength = dataBlocks * kDigi00xDuplexDataBlockQuadlets * sizeof(uint32_t);
         uint32_t packetDataLength = 8u + payloadLength;
         uint32_t headerDMA = itHeaderStorageDMA + packet * 8u;
-        uint32_t payloadDMA = itPayloadDMA + payloadByteOffset;
+        uint32_t payloadDMA = itPayloadDMA + packet * kDigiLiveITPayloadStrideBytes;
         uint32_t cipHeader0 =
             sourceNodeIDField |
             (kDigi00xDuplexDataBlockQuadlets << 16) |
@@ -5048,7 +5205,7 @@ ConfigureDigiLiveTransmitDescriptors(volatile OHCIAsyncDescriptor * itDescriptor
         cipHeader[1] = ToBigEndian32(cipHeader1);
 
         volatile uint32_t * payload =
-            itPayloadStorage + (payloadByteOffset / sizeof(uint32_t));
+            itPayloadStorage + ((packet * kDigiLiveITPayloadStrideBytes) / sizeof(uint32_t));
         for (uint32_t block = 0; block < dataBlocks; ++block) {
             payload[0] = ToBigEndian32(0x80000000u);
             for (uint32_t channel = 0; channel < kDigi00xDuplexPCMAudioChannels; ++channel) {
@@ -5058,7 +5215,6 @@ ConfigureDigiLiveTransmitDescriptors(volatile OHCIAsyncDescriptor * itDescriptor
         }
 
         dataBlockCounter = (dataBlockCounter + dataBlocks) & 0xffu;
-        payloadByteOffset += payloadLength;
     }
 }
 
@@ -5169,7 +5325,9 @@ StartDigiLiveIsoStream()
                                          itPayloadDMA,
                                          itHeaderStorage,
                                          itPayloadStorage,
-                                         sourceNodeIDField);
+                                         sourceNodeIDField,
+                                         nullptr,
+                                         0);
     ConfigureDigiLiveReceiveDescriptors(irDescriptor, irDescriptorDMA, irDataDMA);
 
     gDigiLiveSyncForDeviceRet =
@@ -5269,6 +5427,7 @@ StartDigiLiveStreamForAudio()
     gDigiLiveLastHarvestBytes = 0;
     gDigiLiveLastHarvestPeakAbs = 0;
     gDigiLiveLastHarvestLabelMismatchCount = 0;
+    ResetDigiLiveSequenceReplayState();
 
     kern_return_t ret = RunDigiLiveBeginTransactions();
     if (ret == kIOReturnSuccess) {
@@ -5440,7 +5599,13 @@ HarvestDigiLiveIsoStream()
         gDigiLiveLastDescriptorPayloadStatus = payloadStatus;
         gDigiLiveLastDescriptorHeaderResCount = headerResCount;
         gDigiLiveLastDescriptorPayloadResCount = payloadResCount;
+        uint64_t dbcLostBefore = gDigiLiveRxDBCLostCount;
+        uint64_t cycleLostBefore = gDigiLiveRxCycleLostCount;
         UpdateDigiLiveReceiveTimingDiagnostics(packet.header, dataBlocks);
+        bool continuousForReplay =
+            gDigiLiveRxDBCLostCount == dbcLostBefore &&
+            gDigiLiveRxCycleLostCount == cycleLostBefore;
+        RecordDigiLiveSequenceReplayPacket(dataBlocks, continuousForReplay);
 
         if (dataBlocks != 0) {
             volatile uint32_t * packetPayload = packet.payload;
@@ -5534,6 +5699,110 @@ HarvestDigiLiveIsoStream()
     return ret;
 }
 
+kern_return_t
+ApplyDigiLiveSequenceReplay()
+{
+    if (kDigiLiveSequenceReplayEnabled == 0 ||
+        gDigiLiveSequenceReplayReady == 0 ||
+        gDigiLiveSequenceReplayActive != 0 ||
+        gDigiLiveRunning == 0 ||
+        gDigiLiveBuffer.cpuRange.address == 0 ||
+        gDigiLiveBuffer.command == nullptr ||
+        gPCIDevice == nullptr ||
+        gPCIMemoryIndex == 0xff) {
+        return kIOReturnNotReady;
+    }
+    if (gDigiLiveSequenceReplayApplyAttemptCount != 0) {
+        return kIOReturnBusy;
+    }
+
+    gDigiLiveSequenceReplayApplyAttemptCount++;
+    gDigiLiveSequenceReplayApplyRet = ReturnCodeToProperty(kIOReturnNotReady);
+
+    volatile OHCIAsyncDescriptor * itDescriptor =
+        reinterpret_cast<volatile OHCIAsyncDescriptor *>(gDigiLiveBuffer.cpuRange.address +
+                                                        kDigi00xDuplexITDescriptorOffset);
+    volatile OHCIAsyncDescriptor * irDescriptor =
+        reinterpret_cast<volatile OHCIAsyncDescriptor *>(gDigiLiveBuffer.cpuRange.address +
+                                                        kDigi00xDuplexIRDescriptorOffset);
+    uint32_t dmaBase = static_cast<uint32_t>(gDigiLiveBuffer.dmaSegment.address);
+    uint32_t itDescriptorDMA = dmaBase + kDigi00xDuplexITDescriptorOffset;
+    uint32_t irDescriptorDMA = dmaBase + kDigi00xDuplexIRDescriptorOffset;
+    uint32_t itHeaderStorageDMA = dmaBase + kDigi00xDuplexITHeaderStorageOffset;
+    uint32_t itPayloadDMA = dmaBase + kDigi00xDuplexITPayloadOffset;
+    uint32_t irDataDMA = dmaBase + kDigi00xDuplexIRDataOffset;
+    volatile uint32_t * itHeaderStorage =
+        reinterpret_cast<volatile uint32_t *>(gDigiLiveBuffer.cpuRange.address +
+                                              kDigi00xDuplexITHeaderStorageOffset);
+    volatile uint32_t * itPayloadStorage =
+        reinterpret_cast<volatile uint32_t *>(gDigiLiveBuffer.cpuRange.address +
+                                              kDigi00xDuplexITPayloadOffset);
+
+    uint64_t itControlSet = OhciIsoXmitContextControlSetOffset(kDigi00xDuplexContextIndex);
+    uint64_t itControlClear = OhciIsoXmitContextControlClearOffset(kDigi00xDuplexContextIndex);
+    uint64_t itCommandPtrOffset = OhciIsoXmitCommandPtrOffset(kDigi00xDuplexContextIndex);
+    uint64_t irControlSet = OhciIsoRcvContextControlSetOffset(kDigi00xDuplexContextIndex);
+    uint64_t irControlClear = OhciIsoRcvContextControlClearOffset(kDigi00xDuplexContextIndex);
+    uint64_t irCommandPtrOffset = OhciIsoRcvCommandPtrOffset(kDigi00xDuplexContextIndex);
+    uint64_t irContextMatchOffset = OhciIsoRcvContextMatchOffset(kDigi00xDuplexContextIndex);
+    uint32_t contextBit = 1u << kDigi00xDuplexContextIndex;
+
+    StopContext(gPCIDevice,
+                gPCIMemoryIndex,
+                itControlSet,
+                itControlClear,
+                &gDigiLiveITStopLoops,
+                &gDigiLiveITControlAfterStop);
+    StopContext(gPCIDevice,
+                gPCIMemoryIndex,
+                irControlSet,
+                irControlClear,
+                &gDigiLiveIRStopLoops,
+                &gDigiLiveIRControlAfterStop);
+
+    uint32_t nodeID = 0;
+    gPCIDevice->MemoryRead32(gPCIMemoryIndex, kOhciNodeIdOffset, &nodeID);
+    uint32_t sourceNodeIDField = (nodeID & 0x3fu) << 24;
+    ConfigureDigiLiveTransmitDescriptors(itDescriptor,
+                                         itDescriptorDMA,
+                                         itHeaderStorageDMA,
+                                         itPayloadDMA,
+                                         itHeaderStorage,
+                                         itPayloadStorage,
+                                         sourceNodeIDField,
+                                         gDigiLiveSequenceReplayPeriod,
+                                         kDigiLiveSequenceReplayPeriodPackets);
+    ConfigureDigiLiveReceiveDescriptors(irDescriptor, irDescriptorDMA, irDataDMA);
+    gDigiLiveIRReadIndex = 0;
+
+    kern_return_t syncRet = SyncDMABufferForDevice(&gDigiLiveBuffer, kDigi00xDuplexBufferSize);
+    gDigiLiveSyncForDeviceRet = ReturnCodeToProperty(syncRet);
+    if (syncRet != kIOReturnSuccess) {
+        gDigiLiveSequenceReplayApplyRet = ReturnCodeToProperty(syncRet);
+        return syncRet;
+    }
+
+    gDigiLiveITCommandPtr = itDescriptorDMA | kDigi00xDuplexITDescriptorsPerPacket;
+    gDigiLiveIRCommandPtr = irDescriptorDMA | DigiLiveReceiveDescriptorBranchCount();
+    gDigiLiveIRContextMatch = (0xfu << 28) | kDigi00xDuplexDeviceTransmitChannel;
+    gPCIDevice->MemoryWrite32(gPCIMemoryIndex, itCommandPtrOffset, gDigiLiveITCommandPtr);
+    gPCIDevice->MemoryWrite32(gPCIMemoryIndex, irCommandPtrOffset, gDigiLiveIRCommandPtr);
+    gPCIDevice->MemoryWrite32(gPCIMemoryIndex, irContextMatchOffset, gDigiLiveIRContextMatch);
+
+    gPCIDevice->MemoryWrite32(gPCIMemoryIndex, kOhciIsoRecvIntEventClearOffset, contextBit);
+    gPCIDevice->MemoryWrite32(gPCIMemoryIndex, kOhciIsoXmitIntEventClearOffset, contextBit);
+    gPCIDevice->MemoryWrite32(gPCIMemoryIndex, irControlSet, kIrContextIsochHeader | kContextRun);
+    gPCIDevice->MemoryRead32(gPCIMemoryIndex, irControlSet, &gDigiLiveIRControlAfterRun);
+    gPCIDevice->MemoryWrite32(gPCIMemoryIndex, itControlClear, 0xffffffff);
+    gPCIDevice->MemoryWrite32(gPCIMemoryIndex, itControlSet, kContextRun);
+    gPCIDevice->MemoryRead32(gPCIMemoryIndex, itControlSet, &gDigiLiveITControlAfterRun);
+
+    gDigiLiveSequenceReplayActive = 1;
+    gDigiLiveSequenceReplayApplySuccessCount++;
+    gDigiLiveSequenceReplayApplyRet = ReturnCodeToProperty(kIOReturnSuccess);
+    return kIOReturnSuccess;
+}
+
 void
 PrebufferDigiLiveAudio()
 {
@@ -5547,6 +5816,15 @@ PrebufferDigiLiveAudio()
          gAudioRingCurrentFillFrames < kDigiLivePrebufferTargetFrames;
          ++attempt) {
         kern_return_t ret = HarvestDigiLiveIsoStream();
+        if (gDigiLiveSequenceReplayReady != 0 &&
+            gDigiLiveSequenceReplayActive == 0 &&
+            gDigiLiveSequenceReplayApplyAttemptCount == 0) {
+            kern_return_t replayRet = ApplyDigiLiveSequenceReplay();
+            if (replayRet == kIOReturnSuccess) {
+                ResetAudioRingBuffer();
+                ClearAudioInputBuffer();
+            }
+        }
         IOSleep(ret == kIOReturnSuccess ? 1 : 2);
     }
     PublishAudioRuntimeDiagnostics();
