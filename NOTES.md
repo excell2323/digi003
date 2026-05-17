@@ -8,7 +8,7 @@ Current active local version:
 
 - Driver: `com.axelheckert.driver.FireWireOHCIProbe`
 - Host app: `com.axelheckert.FireWireOHCIProbeLoader`
-- Version: `0.2.136/336`
+- Version: `0.2.138/338`
 - Team ID used locally: `7H3ND356AV`
 - Controller: `pci11c1,5901` / IEEE 1394 Open HCI
 
@@ -1332,6 +1332,63 @@ ProbeDigiLiveSequenceReplayMovingGuardRejectCount=0
 ProbeDigiLiveSequenceReplayMovingBadCommandPtrCount=0
 ProbeDigiLiveSequenceReplayMovingLastStartDistancePackets=4096
 ProbeDigiLiveSequenceReplayMovingLastEndDistancePackets=4175
+```
+
+`0.2.137` enabled guarded live moving replay writes with the 4096-packet lead.
+Reject this build: the guard showed the update window was far ahead of the
+hardware pointer, but live descriptor mutation still caused command-pointer
+failures and repeated input samples almost immediately.
+
+```text
+Captures/coreaudio-digi003-test-0.2.137-guarded-live-3s.wav
+nonzero_frames=32576
+repeated_frames=99466
+after_1s_repeated_frames=87917
+after_2s_repeated_frames=44099
+ProbeDigiLiveSequenceReplayMovingDryRunEnabled=0
+ProbeDigiLiveSequenceReplayMovingUpdateSuccessCount=44
+ProbeDigiLiveSequenceReplayMovingUpdatePacketCount=3520
+ProbeDigiLiveSequenceReplayMovingGuardEligibleCount=44
+ProbeDigiLiveSequenceReplayMovingGuardRejectCount=0
+ProbeDigiLiveSequenceReplayMovingBadCommandPtrCount=960
+ProbeDigiLiveSequenceReplayMovingLastCurrentPacketIndex=0xffffffff
+ProbeDigiLiveSequenceReplayMovingLastSyncRet=3758097112
+ProbeAudioRuntimeRingUnderrunFrames=0
+```
+
+Interpretation:
+
+Increasing the lead and guarding against wrapping over the live hardware pointer
+is not sufficient. The likely blocker is the descriptor mutation strategy itself:
+the OHCI context may prefetch or cache descriptors, or observe transiently
+inconsistent descriptor/header state while the context is running. The next live
+output experiment should use a different strategy, such as pre-start/static
+descriptor preparation, a staged ring, or a controlled stop/restart boundary.
+
+`0.2.138` restores the guarded dry-run state after the rejected 0.2.137 live
+write test. The 10-second input path is clean again, and the guard diagnostics
+still say the planned write windows would be eligible in dry-run.
+
+```text
+Captures/coreaudio-digi003-test-0.2.138-dryrun-restore-10s.wav
+nonzero_frames=433960
+repeated_frames=6912
+after_1s_repeated_frames=0
+after_2s_repeated_frames=0
+last_5s_repeated_frames=0
+ProbeAudioRuntimeRingUnderrunFrames=0
+ProbeDigiLiveSequenceReplayMovingDryRunEnabled=1
+ProbeDigiLiveSequenceReplayMovingLeadPackets=4096
+ProbeDigiLiveSequenceReplayMovingUpdateSuccessCount=0
+ProbeDigiLiveSequenceReplayMovingDryRunSuccessCount=686
+ProbeDigiLiveSequenceReplayMovingDryRunPacketCount=54880
+ProbeDigiLiveSequenceReplayMovingGuardEligibleCount=686
+ProbeDigiLiveSequenceReplayMovingGuardRejectCount=0
+ProbeDigiLiveSequenceReplayMovingGuardDryRunWouldWriteCount=686
+ProbeDigiLiveSequenceReplayMovingGuardDryRunWouldRejectCount=0
+ProbeDigiLiveSequenceReplayMovingLastStartDistancePackets=4096
+ProbeDigiLiveSequenceReplayMovingLastEndDistancePackets=4175
+ProbeDigiLiveSequenceReplayMovingBadCommandPtrCount=0
 ```
 
 ## Local Automation Notes
