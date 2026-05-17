@@ -278,9 +278,10 @@ constexpr uint32_t kAudioDeviceZeroTimestampPeriod = 128;
 constexpr uint32_t kAudioInputBufferFrameCount = 8192;
 constexpr uint32_t kAudioRingBufferFrameCount = 65536;
 constexpr uint32_t kAudioOutputStreamEnabled = 1;
-constexpr uint32_t kAudioOutputBufferFrameCount = 8192;
+constexpr uint32_t kAudioOutputBufferFrameCount = 128;
 constexpr uint32_t kAudioOutputRingBufferFrameCount = 65536;
 constexpr uint32_t kAudioOutputChannelCount = 8;
+constexpr uint32_t kAudioOutputBufferOffsetMode = 1;
 constexpr uint32_t kAudioOutputRingPrebufferFrames = 1024;
 constexpr uint32_t kAudioOutputRingKeepFrames = 0;
 constexpr uint32_t kAudioRefreshStopWaitLoopLimit = 1000;
@@ -2112,6 +2113,7 @@ PublishAudioRuntimeDiagnostics()
     AddNumberProperty(properties, "ProbeAudioRuntimeOutputLastBufferFrameSize", gAudioOutputLastBufferFrameSize, 32);
     AddNumberProperty(properties, "ProbeAudioRuntimeOutputLastSampleTime", gAudioOutputLastSampleTime, 64);
     AddNumberProperty(properties, "ProbeAudioRuntimeOutputRingCapacityFrames", kAudioOutputRingBufferFrameCount, 32);
+    AddNumberProperty(properties, "ProbeAudioRuntimeOutputBufferOffsetMode", kAudioOutputBufferOffsetMode, 32);
     AddNumberProperty(properties, "ProbeAudioRuntimeOutputRingWriteFrame", gAudioOutputRingWriteFrame, 64);
     AddNumberProperty(properties, "ProbeAudioRuntimeOutputRingReadFrame", gAudioOutputRingReadFrame, 64);
     AddNumberProperty(properties, "ProbeAudioRuntimeOutputRingProducedFrames", gAudioOutputRingProducedFrames, 64);
@@ -3015,9 +3017,16 @@ AppendAudioOutputBufferToRing(uint32_t frameCount, uint64_t sampleTime)
         reinterpret_cast<volatile int32_t *>(gAudioOutputCPUAddress.address);
     gAudioOutputRingLastAppendDroppedFrames = 0;
     for (uint32_t frame = 0; frame < frameCount; ++frame) {
-        uint32_t srcFrame =
-            static_cast<uint32_t>((sampleTime + frame) %
-                                  kAudioOutputBufferFrameCount);
+        uint32_t srcFrame = frame;
+        if (kAudioOutputBufferOffsetMode == 1) {
+            srcFrame = static_cast<uint32_t>((sampleTime + frame) %
+                                             kAudioOutputBufferFrameCount);
+        } else if (kAudioOutputBufferOffsetMode == 2) {
+            uint64_t blockStart =
+                sampleTime + kAudioOutputBufferFrameCount - frameCount;
+            srcFrame = static_cast<uint32_t>((blockStart + frame) %
+                                             kAudioOutputBufferFrameCount);
+        }
         int32_t frameSamples[kAudioOutputChannelCount] = {};
         for (uint32_t channel = 0; channel < kAudioOutputChannelCount; ++channel) {
             frameSamples[channel] =
@@ -10414,6 +10423,7 @@ IMPL(FireWireOHCIProbe, Start)
         AddNumberProperty(diagnostics, "ProbeAudioOutputBufferBytes", kAudioOutputBufferBytes, 64);
         AddNumberProperty(diagnostics, "ProbeAudioRingBufferFrameCount", kAudioRingBufferFrameCount, 32);
         AddNumberProperty(diagnostics, "ProbeAudioOutputRingBufferFrameCount", kAudioOutputRingBufferFrameCount, 32);
+        AddNumberProperty(diagnostics, "ProbeAudioOutputBufferOffsetMode", kAudioOutputBufferOffsetMode, 32);
         AddNumberProperty(diagnostics, "ProbeAudioOutputRingPrebufferFrames", kAudioOutputRingPrebufferFrames, 32);
         AddNumberProperty(diagnostics, "ProbeAudioOutputRingKeepFrames", kAudioOutputRingKeepFrames, 32);
         AddNumberProperty(diagnostics, "ProbeDigiLiveOutputServiceAheadPackets", kDigiLiveOutputServiceAheadPackets, 32);

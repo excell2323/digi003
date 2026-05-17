@@ -10,7 +10,10 @@
 typedef struct PlayerState {
     AudioQueueRef queue;
     UInt32 framesWritten;
-    UInt32 maxFrames;
+    UInt32 toneFrames;
+    UInt32 fadeFrames;
+    UInt32 tailFrames;
+    UInt32 totalFrames;
     double phase;
     double phaseStep;
     int done;
@@ -98,12 +101,22 @@ static void output_callback(void *userData, AudioQueueRef queue, AudioQueueBuffe
     const UInt32 framesPerBuffer = 512;
     int32_t *samples = (int32_t *)buffer->mAudioData;
     UInt32 frames = framesPerBuffer;
-    if (state->framesWritten + frames > state->maxFrames) {
-        frames = state->maxFrames - state->framesWritten;
+    if (state->framesWritten + frames > state->totalFrames) {
+        frames = state->totalFrames - state->framesWritten;
     }
 
     for (UInt32 frame = 0; frame < frames; ++frame) {
-        double s = sin(state->phase) * 0.12;
+        UInt32 absoluteFrame = state->framesWritten + frame;
+        double gain = 0.12;
+        if (absoluteFrame >= state->toneFrames) {
+            UInt32 fadeFrame = absoluteFrame - state->toneFrames;
+            if (fadeFrame < state->fadeFrames && state->fadeFrames > 0) {
+                gain *= 1.0 - ((double)fadeFrame / (double)state->fadeFrames);
+            } else {
+                gain = 0.0;
+            }
+        }
+        double s = sin(state->phase) * gain;
         int32_t sample = (int32_t)(s * 2147483647.0);
         samples[frame * channels + 0] = sample;
         samples[frame * channels + 1] = sample;
@@ -121,25 +134,34 @@ static void output_callback(void *userData, AudioQueueRef queue, AudioQueueBuffe
     if (frames > 0) {
         AudioQueueEnqueueBuffer(queue, buffer, 0, NULL);
     }
-    if (state->framesWritten >= state->maxFrames) {
+    if (state->framesWritten >= state->totalFrames) {
         state->done = 1;
-        AudioQueueStop(queue, false);
-        CFRunLoopStop(CFRunLoopGetCurrent());
     }
 }
 
 int main(int argc, char **argv) {
     double seconds = argc > 1 ? atof(argv[1]) : 2.0;
     double frequency = argc > 2 ? atof(argv[2]) : 440.0;
+    double fadeMs = argc > 3 ? atof(argv[3]) : 80.0;
+    double tailMs = argc > 4 ? atof(argv[4]) : 250.0;
     if (seconds < 0.1) {
         seconds = 2.0;
     }
     if (frequency < 20.0 || frequency > 20000.0) {
         frequency = 440.0;
     }
+    if (fadeMs < 0.0 || fadeMs > 5000.0) {
+        fadeMs = 80.0;
+    }
+    if (tailMs < 0.0 || tailMs > 5000.0) {
+        tailMs = 250.0;
+    }
 
     PlayerState state = {};
-    state.maxFrames = (UInt32)(44100.0 * seconds);
+    state.toneFrames = (UInt32)(44100.0 * seconds);
+    state.fadeFrames = (UInt32)((44100.0 * fadeMs) / 1000.0);
+    state.tailFrames = (UInt32)((44100.0 * tailMs) / 1000.0);
+    state.totalFrames = state.toneFrames + state.fadeFrames + state.tailFrames;
     state.phaseStep = (2.0 * M_PI * frequency) / 44100.0;
 
     CFStringRef uid = NULL;
@@ -195,9 +217,14 @@ int main(int argc, char **argv) {
         return 7;
     }
 
-    CFRunLoopRunInMode(kCFRunLoopDefaultMode, seconds + 2.0, false);
+    double totalSeconds = (double)state.totalFrames / 44100.0;
+    CFRunLoopRunInMode(kCFRunLoopDefaultMode, totalSeconds + 1.0, false);
     AudioQueueStop(state.queue, true);
     AudioQueueDispose(state.queue, true);
-    printf("frames=%u\n", state.framesWritten);
+    printf("frames=%u tone=%u fade=%u tail=%u\n",
+           state.framesWritten,
+           state.toneFrames,
+           state.fadeFrames,
+           state.tailFrames);
     return state.framesWritten > 0 ? 0 : 8;
 }

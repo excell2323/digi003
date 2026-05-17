@@ -8,7 +8,7 @@ Current active local version:
 
 - Driver: `com.axelheckert.driver.FireWireOHCIProbe`
 - Host app: `com.axelheckert.FireWireOHCIProbeLoader`
-- Version: `0.2.145/345`
+- Version: `0.2.149/349`
 - Team ID used locally: `7H3ND356AV`
 - Controller: `pci11c1,5901` / IEEE 1394 Open HCI
 
@@ -1588,9 +1588,63 @@ ProbeAudioRuntimeRingRepeatedFrames=0
 ProbeDigiLiveRxCycleLostCount=0
 ```
 
+## 0.2.146 Output Buffer Offset Fix
+
+`0.2.146` changes the AudioDriverKit output copy path to read each `WriteEnd`
+IO block from the beginning of the output IO buffer instead of using
+`sampleTime % 8192` as a ring-buffer offset. The previous logic produced
+8192-sample phase/chunk jumps in loopback captures, which matched the audible
+stutter even though the output ring itself did not underrun.
+
+## 0.2.147 Output WriteEnd End-Time Offset
+
+`0.2.147` tests the hypothesis that AudioDriverKit reports the `WriteEnd`
+sample time at the end of the just-written block. The output copy path now reads
+from `(sampleTime - frameCount) % outputBufferFrames`, rather than frame 0 or
+`sampleTime % outputBufferFrames`.
+
 `Tools/play-digi-output 2 440` produced 88200 CoreAudio output frames and the
 driver wrote 87499 frames to the live IT payload ring with no output underruns.
 Audible confirmation is still pending.
+
+Loopback measurement shows this is not the right mapping: the stream keeps
+moving, but the captured 440 Hz tone still has invalid short zero-crossing
+intervals and a low peak, matching audible ticking rather than continuous audio.
+
+## 0.2.148 Output Host Buffer Period
+
+`0.2.148` follows ASFireWire's AudioDriverKit pattern more closely for playback:
+the CoreAudio output stream buffer is reduced from 8192 frames to 512 frames and
+the copy path returns to `sampleTime % bufferFrames`.
+
+The working theory is that the host only publishes fresh output audio inside the
+active host-period region. With an 8192-frame output buffer the driver often
+read stale or unwritten areas; the frame-0 test was loud but repeated the wrong
+phase, which produced ticking. A 512-frame output buffer should make the host
+write offset and the driver's copy offset describe the same memory region.
+
+Loopback did not confirm this: the recorded signal was near noise floor and
+strongly 128-frame-periodic. That points back to the device zero-timestamp
+period as the real host-buffer period for this driver.
+
+## 0.2.149 Output 128-Frame Host Buffer
+
+`0.2.149` keeps `sampleTime % bufferFrames`, but reduces the CoreAudio output
+buffer to 128 frames, matching `kAudioDeviceZeroTimestampPeriod`.
+
+Validation:
+
+- Direct listening: 440 Hz playback sounds correct.
+- Concurrent loopback capture:
+  `Captures/coreaudio-digi003-loopback-0.2.149-concurrent-fade-10s.wav`.
+- Capture peak on input 1: about `1,026,476`.
+- Active tone region: about `1.13s..7.09s`, with no 10 ms RMS gaps.
+- Zero-crossing median: `50` samples, matching 440 Hz at 44.1 kHz.
+- Runtime diagnostics after the run: output underruns `0`, output overruns `0`,
+  RX DBC lost `0`, RX cycle lost `0`.
+
+`Tools/play-digi-output` now applies a short fade-out and optional silent tail
+to avoid a hard click when the test tone stops.
 
 ## 0.2.141 Output Payload Path
 
