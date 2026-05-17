@@ -8,7 +8,7 @@ Current active local version:
 
 - Driver: `com.axelheckert.driver.FireWireOHCIProbe`
 - Host app: `com.axelheckert.FireWireOHCIProbeLoader`
-- Version: `0.2.102/302`
+- Version: `0.2.104/304`
 - Team ID used locally: `7H3ND356AV`
 - Controller: `pci11c1,5901` / IEEE 1394 Open HCI
 
@@ -621,6 +621,36 @@ ring_underrun_frames=0
 Interpretation:
 
 This returns the short-run capture behavior to the usable 0.2.100 shape after the rejected 0.2.101 event-gate bypass test.
+
+### 0.2.103 low-water event-gate bypass rejection
+
+This kept the normal IR event gate, but allowed missed-event bypass only when the audio ring fell below 16384 frames.
+
+```text
+Captures/coreaudio-digi003-test-0.2.103-lowwater-ir-bypass-10s.wav
+after_1s_repeated_frames=0
+last_5s_repeated_frames=0
+
+Captures/coreaudio-digi003-test-0.2.103-lowwater-ir-bypass-30s.wav
+total_repeated_frames=109603
+after_1s_repeated_frames=104000
+last_10s_repeated_frames=57664
+last_5s_repeated_frames=36785
+ir_event_gate_bypass_count=26457
+drain_busy_count=9809
+```
+
+Interpretation:
+
+The targeted bypass did not rescue late underruns; once the ring went low it triggered a large number of extra sync attempts and made the 30-second capture worse. Version 0.2.104 restores the event-gated 0.2.102 behavior with only the version advanced.
+
+0.2.104 control capture:
+
+```text
+Captures/coreaudio-digi003-test-0.2.104-restored-after-lowwater-10s.wav
+after_1s_repeated_frames=0
+last_5s_repeated_frames=0
+```
 
 ## Local Automation Notes
 
