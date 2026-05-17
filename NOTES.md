@@ -8,7 +8,7 @@ Current active local version:
 
 - Driver: `com.axelheckert.driver.FireWireOHCIProbe`
 - Host app: `com.axelheckert.FireWireOHCIProbeLoader`
-- Version: `0.2.157/357`
+- Version: `0.2.159/359`
 - Team ID used locally: `7H3ND356AV`
 - Controller: `pci11c1,5901` / IEEE 1394 Open HCI
 
@@ -1813,6 +1813,35 @@ per data block:
 ```text
 90 nn vv  ->  80 90 nn e2, 80 vv 00 e1
 ```
+
+## 0.2.158 Wider Control Ring
+
+Expands the raw slot-0 MIDI/control ring to 256 words and publishes the full
+ring as `ProbeControlRecentRawWordsBE`. The first 16 words are still exposed as
+individual `ProbeControlRecentRawWord*BE` diagnostics for quick button tests.
+This captures an entire short fader move instead of only the final few
+fragments.
+
+## 0.2.159 Experimental Control Echo
+
+Adds an experimental slot-0 echo queue. Valid incoming console MIDI/control
+fragments are queued and transmitted back through output slot 0 before the audio
+slots. This is a first probe for the Digi 003's expected host feedback path for
+motor faders and LEDs; audio payload slots are unchanged.
+
+Confirmed locally:
+
+- SELECT 1 LED feedback works through the echoed output slot-0 control stream.
+- Fader 1 stays at the touched position after release when echo is active.
+- A Fader 1 test echoed `164` received fragments with `0` drops, `0` busy
+  collisions, and an empty queue after transmit.
+- Audio output diagnostics stayed clean during the control echo test:
+  `ProbeAudioRuntimeOutputRingUnderrunFrames=0`,
+  `ProbeAudioRuntimeOutputRingOverrunFrames=0`, and
+  `ProbeDigiLiveOutputCursorCatchUpCount=0`.
+
+`Tools/decode-control-ring.py` decodes `ProbeControlRecentRawWordsBE` from
+IORegistry into slot-0 words and reconstructed MIDI messages.
 
 ## Async Control Reference
 

@@ -219,7 +219,10 @@ constexpr uint32_t kDigi00xDuplexDataBlockQuadlets = 19;
 constexpr uint32_t kDigi00xDuplexDataBlockBytes =
     kDigi00xDuplexDataBlockQuadlets * sizeof(uint32_t);
 constexpr uint32_t kDigi00xDuplexPCMAudioChannels = 18;
-constexpr uint32_t kDigiLiveMidiRecentMessageCount = 16;
+constexpr uint32_t kDigiLiveMidiRecentMessageCount = 256;
+constexpr uint32_t kDigiLiveMidiRecentIndexedPublishCount = 16;
+constexpr uint32_t kDigiLiveMidiEchoToOutputEnabled = 1;
+constexpr uint32_t kDigiLiveMidiEchoQueueSize = 1024;
 constexpr uint32_t kDigi00xDuplexCIPSFC44100 = 1;
 constexpr uint32_t kDigi00xCIPDBCMask = 0x000000ff;
 constexpr uint32_t kDigi00xCIPSYTMask = 0x0000ffff;
@@ -1185,6 +1188,17 @@ uint32_t gDigiLiveMidiRecentIndex = 0;
 uint32_t gDigiLiveMidiRecentCount = 0;
 uint32_t gDigiLiveMidiRecentRawWordBE[kDigiLiveMidiRecentMessageCount] = {};
 uint64_t gDigiLiveMidiLoggedMessageCount = 0;
+uint32_t gDigiLiveMidiEchoQueueBusy = 0;
+uint32_t gDigiLiveMidiEchoReadIndex = 0;
+uint32_t gDigiLiveMidiEchoWriteIndex = 0;
+uint32_t gDigiLiveMidiEchoQueueCount = 0;
+uint32_t gDigiLiveMidiEchoLastQueuedRawWordBE = 0;
+uint32_t gDigiLiveMidiEchoLastTransmitRawWordBE = 0;
+uint32_t gDigiLiveMidiEchoQueue[kDigiLiveMidiEchoQueueSize] = {};
+uint64_t gDigiLiveMidiEchoAppendCount = 0;
+uint64_t gDigiLiveMidiEchoDropCount = 0;
+uint64_t gDigiLiveMidiEchoTransmitCount = 0;
+uint64_t gDigiLiveMidiEchoBusyCount = 0;
 uint32_t gDigiLiveSyncForDeviceRet = static_cast<uint32_t>(kIOReturnNotReady);
 uint32_t gDigiLiveSyncForCPURet = static_cast<uint32_t>(kIOReturnNotReady);
 uint32_t gDigiLiveCompleteRet = static_cast<uint32_t>(kIOReturnNotReady);
@@ -1511,7 +1525,19 @@ PublishDigiLiveControlDiagnostics(uint32_t rawWordBE,
     AddNumberProperty(properties, "ProbeControlTimestamp", mach_absolute_time(), 64);
     AddNumberProperty(properties, "ProbeControlRecentIndex", gDigiLiveMidiRecentIndex, 32);
     AddNumberProperty(properties, "ProbeControlRecentCount", gDigiLiveMidiRecentCount, 32);
-    for (uint32_t i = 0; i < kDigiLiveMidiRecentMessageCount; ++i) {
+    AddNumberProperty(properties, "ProbeControlEchoEnabled", kDigiLiveMidiEchoToOutputEnabled, 32);
+    AddNumberProperty(properties, "ProbeControlEchoQueueCount", gDigiLiveMidiEchoQueueCount, 32);
+    AddNumberProperty(properties, "ProbeControlEchoLastQueuedRawWordBE", gDigiLiveMidiEchoLastQueuedRawWordBE, 32);
+    AddNumberProperty(properties, "ProbeControlEchoLastTransmitRawWordBE", gDigiLiveMidiEchoLastTransmitRawWordBE, 32);
+    AddNumberProperty(properties, "ProbeControlEchoAppendCount", gDigiLiveMidiEchoAppendCount, 64);
+    AddNumberProperty(properties, "ProbeControlEchoDropCount", gDigiLiveMidiEchoDropCount, 64);
+    AddNumberProperty(properties, "ProbeControlEchoTransmitCount", gDigiLiveMidiEchoTransmitCount, 64);
+    AddNumberProperty(properties, "ProbeControlEchoBusyCount", gDigiLiveMidiEchoBusyCount, 64);
+    AddDataProperty(properties,
+                    "ProbeControlRecentRawWordsBE",
+                    gDigiLiveMidiRecentRawWordBE,
+                    sizeof(gDigiLiveMidiRecentRawWordBE));
+    for (uint32_t i = 0; i < kDigiLiveMidiRecentIndexedPublishCount; ++i) {
         AddIndexedNumberProperty(properties,
                                  "ProbeControlRecentRawWord",
                                  i,
@@ -1531,6 +1557,72 @@ ToBigEndian32(uint32_t value)
            ((value & 0x0000ff00u) << 8) |
            ((value & 0x00ff0000u) >> 8) |
            ((value & 0xff000000u) >> 24);
+}
+
+bool
+TryAcquireDigiLiveMidiEchoQueue()
+{
+    if (__sync_lock_test_and_set(&gDigiLiveMidiEchoQueueBusy, 1) != 0) {
+        gDigiLiveMidiEchoBusyCount++;
+        return false;
+    }
+    return true;
+}
+
+void
+ReleaseDigiLiveMidiEchoQueue()
+{
+    __sync_lock_release(&gDigiLiveMidiEchoQueueBusy);
+}
+
+void
+AppendDigiLiveMidiEchoWordBE(uint32_t wordBE)
+{
+    if (kDigiLiveMidiEchoToOutputEnabled == 0) {
+        return;
+    }
+    if (!TryAcquireDigiLiveMidiEchoQueue()) {
+        return;
+    }
+
+    if (gDigiLiveMidiEchoQueueCount >= kDigiLiveMidiEchoQueueSize) {
+        gDigiLiveMidiEchoDropCount++;
+        ReleaseDigiLiveMidiEchoQueue();
+        return;
+    }
+
+    gDigiLiveMidiEchoQueue[gDigiLiveMidiEchoWriteIndex] = wordBE;
+    gDigiLiveMidiEchoWriteIndex =
+        (gDigiLiveMidiEchoWriteIndex + 1) % kDigiLiveMidiEchoQueueSize;
+    gDigiLiveMidiEchoQueueCount++;
+    gDigiLiveMidiEchoLastQueuedRawWordBE = wordBE;
+    gDigiLiveMidiEchoAppendCount++;
+    ReleaseDigiLiveMidiEchoQueue();
+}
+
+uint32_t
+PopDigiLiveMidiEchoWordBE()
+{
+    if (kDigiLiveMidiEchoToOutputEnabled == 0) {
+        return 0x80000000u;
+    }
+    if (!TryAcquireDigiLiveMidiEchoQueue()) {
+        return 0x80000000u;
+    }
+
+    if (gDigiLiveMidiEchoQueueCount == 0) {
+        ReleaseDigiLiveMidiEchoQueue();
+        return 0x80000000u;
+    }
+
+    uint32_t wordBE = gDigiLiveMidiEchoQueue[gDigiLiveMidiEchoReadIndex];
+    gDigiLiveMidiEchoReadIndex =
+        (gDigiLiveMidiEchoReadIndex + 1) % kDigiLiveMidiEchoQueueSize;
+    gDigiLiveMidiEchoQueueCount--;
+    gDigiLiveMidiEchoLastTransmitRawWordBE = wordBE;
+    gDigiLiveMidiEchoTransmitCount++;
+    ReleaseDigiLiveMidiEchoQueue();
+    return wordBE;
 }
 
 void
@@ -1566,6 +1658,7 @@ ObserveDigiLiveMidiSlot0(uint32_t slot0WordBE)
     } else {
         gDigiLiveMidiPhysicalMessageCount++;
     }
+    AppendDigiLiveMidiEchoWordBE(slot0WordBE);
 
     gDigiLiveMidiLastMessageRawWordBE = slot0WordBE;
     gDigiLiveMidiLastMessageMarker = marker;
@@ -2153,7 +2246,19 @@ PublishAudioRuntimeDiagnostics()
     AddNumberProperty(properties, "ProbeControlLength", gDigiLiveMidiLastLength, 32);
     AddNumberProperty(properties, "ProbeControlRecentIndex", gDigiLiveMidiRecentIndex, 32);
     AddNumberProperty(properties, "ProbeControlRecentCount", gDigiLiveMidiRecentCount, 32);
-    for (uint32_t i = 0; i < kDigiLiveMidiRecentMessageCount; ++i) {
+    AddNumberProperty(properties, "ProbeControlEchoEnabled", kDigiLiveMidiEchoToOutputEnabled, 32);
+    AddNumberProperty(properties, "ProbeControlEchoQueueCount", gDigiLiveMidiEchoQueueCount, 32);
+    AddNumberProperty(properties, "ProbeControlEchoLastQueuedRawWordBE", gDigiLiveMidiEchoLastQueuedRawWordBE, 32);
+    AddNumberProperty(properties, "ProbeControlEchoLastTransmitRawWordBE", gDigiLiveMidiEchoLastTransmitRawWordBE, 32);
+    AddNumberProperty(properties, "ProbeControlEchoAppendCount", gDigiLiveMidiEchoAppendCount, 64);
+    AddNumberProperty(properties, "ProbeControlEchoDropCount", gDigiLiveMidiEchoDropCount, 64);
+    AddNumberProperty(properties, "ProbeControlEchoTransmitCount", gDigiLiveMidiEchoTransmitCount, 64);
+    AddNumberProperty(properties, "ProbeControlEchoBusyCount", gDigiLiveMidiEchoBusyCount, 64);
+    AddDataProperty(properties,
+                    "ProbeControlRecentRawWordsBE",
+                    gDigiLiveMidiRecentRawWordBE,
+                    sizeof(gDigiLiveMidiRecentRawWordBE));
+    for (uint32_t i = 0; i < kDigiLiveMidiRecentIndexedPublishCount; ++i) {
         AddIndexedNumberProperty(properties,
                                  "ProbeControlRecentRawWord",
                                  i,
@@ -3609,6 +3714,19 @@ ConfigureAudioDevice(FireWireOHCIProbe * driver)
         gDigiLiveMidiRecentRawWordBE[i] = 0;
     }
     gDigiLiveMidiLoggedMessageCount = 0;
+    gDigiLiveMidiEchoQueueBusy = 0;
+    gDigiLiveMidiEchoReadIndex = 0;
+    gDigiLiveMidiEchoWriteIndex = 0;
+    gDigiLiveMidiEchoQueueCount = 0;
+    gDigiLiveMidiEchoLastQueuedRawWordBE = 0;
+    gDigiLiveMidiEchoLastTransmitRawWordBE = 0;
+    for (uint32_t i = 0; i < kDigiLiveMidiEchoQueueSize; ++i) {
+        gDigiLiveMidiEchoQueue[i] = 0;
+    }
+    gDigiLiveMidiEchoAppendCount = 0;
+    gDigiLiveMidiEchoDropCount = 0;
+    gDigiLiveMidiEchoTransmitCount = 0;
+    gDigiLiveMidiEchoBusyCount = 0;
     gDigiLiveSyncForDeviceRet = ReturnCodeToProperty(kIOReturnNotReady);
     gDigiLiveSyncForCPURet = ReturnCodeToProperty(kIOReturnNotReady);
     gDigiLiveCompleteRet = ReturnCodeToProperty(kIOReturnNotReady);
@@ -5866,7 +5984,7 @@ DigiLiveTransmitDataBlocksForPacket(uint32_t packetIndex,
 void
 WriteDigiLiveSilentTransmitDataBlock(volatile uint32_t * payload)
 {
-    payload[0] = ToBigEndian32(0x80000000u);
+    payload[0] = ToBigEndian32(PopDigiLiveMidiEchoWordBE());
     for (uint32_t channel = 0; channel < kDigi00xDuplexPCMAudioChannels; ++channel) {
         payload[1 + channel] = ToBigEndian32(0x40000000u);
     }
@@ -6374,7 +6492,7 @@ void
 WriteDigiLiveOutputTransmitDataBlock(volatile uint32_t * payload,
                                      const int32_t samples[kAudioOutputChannelCount])
 {
-    payload[0] = ToBigEndian32(0x80000000u);
+    payload[0] = ToBigEndian32(PopDigiLiveMidiEchoWordBE());
     for (uint32_t channel = 0; channel < kDigi00xDuplexPCMAudioChannels; ++channel) {
         int32_t sample = channel < kAudioOutputChannelCount ? samples[channel] : 0;
         uint32_t wordBE = AudioOutputSampleToAM824WordBE(sample);
