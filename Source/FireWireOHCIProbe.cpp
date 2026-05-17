@@ -216,6 +216,7 @@ constexpr uint32_t kDigi00xDuplexPCMAudioChannels = 18;
 constexpr uint32_t kDigi00xDuplexCIPSFC44100 = 1;
 constexpr uint32_t kDigi00xCIPDBCMask = 0x000000ff;
 constexpr uint32_t kDigi00xCIPSYTMask = 0x0000ffff;
+constexpr uint32_t kDigi00xCIPFMTAM824 = 0x10;
 constexpr uint32_t kDigi00xDuplexITDescriptorOffset = 0x160000;
 // 20480 packets are 256 full 44.1 kHz cadence periods: phase and DBC both wrap cleanly.
 constexpr uint32_t kDigi00xDuplexITPacketCount = 20480;
@@ -288,6 +289,7 @@ constexpr uint32_t kDigiLiveSequenceReplayMovingQueuePackets = 512;
 constexpr uint32_t kDigiLiveSequenceReplayMovingUpdatePackets = 80;
 constexpr uint32_t kDigiLiveSequenceReplayMovingLeadPackets = 512;
 constexpr uint32_t kDigiLiveSequenceReplayPeriodDataBlocks44100 = 441;
+constexpr uint32_t kDigiLiveRxCadencePeriodPackets = 80;
 constexpr uint32_t kDigiLiveStateStopped = 0;
 constexpr uint32_t kDigiLiveStateStarting = 1;
 constexpr uint32_t kDigiLiveStateRunning = 2;
@@ -378,6 +380,17 @@ struct DigiLiveReceivePacket
     volatile OHCIAsyncDescriptor * descriptor;
     volatile uint32_t * header;
     volatile uint32_t * payload;
+};
+
+struct DigiLiveCIPHeader
+{
+    uint32_t sid;
+    uint32_t dbs;
+    uint32_t sph;
+    uint32_t dbc;
+    uint32_t fmt;
+    uint32_t fdf;
+    uint32_t syt;
 };
 
 volatile OHCIAsyncDescriptor *
@@ -1098,14 +1111,48 @@ uint32_t gDigiLiveRxCIPHeader0 = 0;
 uint32_t gDigiLiveRxCIPHeader1 = 0;
 uint32_t gDigiLiveRxDBC = 0xffffffff;
 uint32_t gDigiLiveRxExpectedDBC = 0xffffffff;
+uint32_t gDigiLiveRxDBCDelta = 0;
+uint32_t gDigiLiveRxMaxDBCDelta = 0;
 uint64_t gDigiLiveRxDBCPacketCount = 0;
 uint64_t gDigiLiveRxDBCLostCount = 0;
 uint64_t gDigiLiveRxDBCInitCount = 0;
 uint32_t gDigiLiveRxSYT = 0xffffffff;
 uint64_t gDigiLiveRxSYTNoInfoCount = 0;
 uint64_t gDigiLiveRxSYTZeroCount = 0;
+uint32_t gDigiLiveRxSID = 0xffffffff;
+uint32_t gDigiLiveRxExpectedSID = 0xffffffff;
+uint32_t gDigiLiveRxDBS = 0xffffffff;
+uint32_t gDigiLiveRxSPH = 0xffffffff;
+uint32_t gDigiLiveRxFMT = 0xffffffff;
+uint32_t gDigiLiveRxFDF = 0xffffffff;
+uint32_t gDigiLiveRxEventCount = 0;
+uint32_t gDigiLiveRxMinEventCount = 0xffffffff;
+uint32_t gDigiLiveRxMaxEventCount = 0;
+uint32_t gDigiLiveRxPayloadRemainderBytes = 0;
+uint64_t gDigiLiveRxStreamProcessorPacketCount = 0;
+uint64_t gDigiLiveRxStreamProcessorValidPacketCount = 0;
+uint64_t gDigiLiveRxPayloadRemainderCount = 0;
+uint64_t gDigiLiveRxUnexpectedSIDCount = 0;
+uint64_t gDigiLiveRxUnexpectedDBSCount = 0;
+uint64_t gDigiLiveRxUnexpectedSPHCount = 0;
+uint64_t gDigiLiveRxUnexpectedFMTCount = 0;
+uint64_t gDigiLiveRxUnexpectedFDFCount = 0;
 uint64_t gDigiLiveRxDataBlockHistogram[9] = {};
 uint64_t gDigiLiveRxUnexpectedDataBlockCount = 0;
+uint8_t gDigiLiveRxCadencePeriod[kDigiLiveRxCadencePeriodPackets] = {};
+uint32_t gDigiLiveRxCadencePeriodCount = 0;
+uint32_t gDigiLiveRxCadenceReady = 0;
+uint32_t gDigiLiveRxCadenceResetCount = 0;
+uint32_t gDigiLiveRxCadenceInvalidCount = 0;
+uint32_t gDigiLiveRxCadenceDiscontinuityCount = 0;
+uint32_t gDigiLiveRxCadenceObservedTotalDataBlocks = 0;
+uint32_t gDigiLiveRxCadenceBadTotalCount = 0;
+uint32_t gDigiLiveRxCadenceLastBadTotalDataBlocks = 0;
+uint32_t gDigiLiveRxCadenceIdealMismatchCount = 0;
+uint32_t gDigiLiveRxCadenceBestPhase = 0xffffffff;
+uint32_t gDigiLiveRxCadenceBestPhaseMismatchCount = 0xffffffff;
+uint32_t gDigiLiveRxCadenceFirstDataBlocks = 0;
+uint32_t gDigiLiveRxCadenceLastDataBlocks = 0;
 uint8_t gDigiLiveSequenceReplayPeriod[kDigiLiveSequenceReplayPeriodPackets] = {};
 uint32_t gDigiLiveSequenceReplayPeriodCount = 0;
 uint32_t gDigiLiveSequenceReplayReady = 0;
@@ -1156,6 +1203,9 @@ int32_t gAudioLastOutputFrame[kDigi00xDuplexIRCapturePCMChannelCount] = {};
 
 kern_return_t
 HarvestDigiLiveIsoStream();
+
+uint32_t
+Digi00xDuplexDataBlocksForPacket(uint32_t packetIndex);
 
 bool
 AddNumberProperty(OSDictionary * properties, const char * key, uint64_t value, size_t bits)
@@ -1228,6 +1278,183 @@ ToBigEndian32(uint32_t value)
            ((value & 0xff000000u) >> 24);
 }
 
+DigiLiveCIPHeader
+ParseDigiLiveCIPHeader(uint32_t cipHeader0, uint32_t cipHeader1)
+{
+    DigiLiveCIPHeader header = {
+        (cipHeader0 >> 24) & 0x3fu,
+        (cipHeader0 >> 16) & 0xffu,
+        (cipHeader0 >> 10) & 0x01u,
+        cipHeader0 & 0xffu,
+        (cipHeader1 >> 24) & 0x3fu,
+        (cipHeader1 >> 16) & 0xffu,
+        cipHeader1 & 0xffffu,
+    };
+    return header;
+}
+
+uint32_t
+DigiLiveDBCForwardDistance(uint32_t expected, uint32_t observed)
+{
+    if (expected == 0xffffffff || observed == 0xffffffff) {
+        return 0;
+    }
+    return (observed + 256u - expected) & 0xffu;
+}
+
+void
+ResetDigiLiveRxCadenceState()
+{
+    for (uint32_t i = 0; i < kDigiLiveRxCadencePeriodPackets; ++i) {
+        gDigiLiveRxCadencePeriod[i] = 0;
+    }
+    gDigiLiveRxCadencePeriodCount = 0;
+    gDigiLiveRxCadenceReady = 0;
+    gDigiLiveRxCadenceResetCount = 0;
+    gDigiLiveRxCadenceInvalidCount = 0;
+    gDigiLiveRxCadenceDiscontinuityCount = 0;
+    gDigiLiveRxCadenceObservedTotalDataBlocks = 0;
+    gDigiLiveRxCadenceBadTotalCount = 0;
+    gDigiLiveRxCadenceLastBadTotalDataBlocks = 0;
+    gDigiLiveRxCadenceIdealMismatchCount = 0;
+    gDigiLiveRxCadenceBestPhase = 0xffffffff;
+    gDigiLiveRxCadenceBestPhaseMismatchCount = 0xffffffff;
+    gDigiLiveRxCadenceFirstDataBlocks = 0;
+    gDigiLiveRxCadenceLastDataBlocks = 0;
+}
+
+void
+ResetDigiLiveReceiveStreamDiagnostics()
+{
+    gDigiLiveRxHeader0Raw = 0;
+    gDigiLiveRxHeader1Raw = 0;
+    gDigiLiveRxHeader2Raw = 0;
+    gDigiLiveRxHeader3Raw = 0;
+    gDigiLiveRxIsoHeader = 0;
+    gDigiLiveRxTimestamp = 0;
+    gDigiLiveRxCycle = 0xffffffff;
+    gDigiLiveRxExpectedCycle = 0xffffffff;
+    gDigiLiveRxCycleDelta = 0;
+    gDigiLiveRxMaxCycleDelta = 0;
+    gDigiLiveRxCycleLostCount = 0;
+    gDigiLiveRxCyclePacketCount = 0;
+    gDigiLiveRxCIPHeader0 = 0;
+    gDigiLiveRxCIPHeader1 = 0;
+    gDigiLiveRxDBC = 0xffffffff;
+    gDigiLiveRxExpectedDBC = 0xffffffff;
+    gDigiLiveRxDBCDelta = 0;
+    gDigiLiveRxMaxDBCDelta = 0;
+    gDigiLiveRxDBCPacketCount = 0;
+    gDigiLiveRxDBCLostCount = 0;
+    gDigiLiveRxDBCInitCount = 0;
+    gDigiLiveRxSYT = 0xffffffff;
+    gDigiLiveRxSYTNoInfoCount = 0;
+    gDigiLiveRxSYTZeroCount = 0;
+    gDigiLiveRxSID = 0xffffffff;
+    gDigiLiveRxExpectedSID = 0xffffffff;
+    gDigiLiveRxDBS = 0xffffffff;
+    gDigiLiveRxSPH = 0xffffffff;
+    gDigiLiveRxFMT = 0xffffffff;
+    gDigiLiveRxFDF = 0xffffffff;
+    gDigiLiveRxEventCount = 0;
+    gDigiLiveRxMinEventCount = 0xffffffff;
+    gDigiLiveRxMaxEventCount = 0;
+    gDigiLiveRxPayloadRemainderBytes = 0;
+    gDigiLiveRxStreamProcessorPacketCount = 0;
+    gDigiLiveRxStreamProcessorValidPacketCount = 0;
+    gDigiLiveRxPayloadRemainderCount = 0;
+    gDigiLiveRxUnexpectedSIDCount = 0;
+    gDigiLiveRxUnexpectedDBSCount = 0;
+    gDigiLiveRxUnexpectedSPHCount = 0;
+    gDigiLiveRxUnexpectedFMTCount = 0;
+    gDigiLiveRxUnexpectedFDFCount = 0;
+    for (size_t i = 0;
+         i < sizeof(gDigiLiveRxDataBlockHistogram) / sizeof(gDigiLiveRxDataBlockHistogram[0]);
+         ++i) {
+        gDigiLiveRxDataBlockHistogram[i] = 0;
+    }
+    gDigiLiveRxUnexpectedDataBlockCount = 0;
+    ResetDigiLiveRxCadenceState();
+}
+
+void
+ResetDigiLiveRxCadenceCapture()
+{
+    if (gDigiLiveRxCadencePeriodCount != 0) {
+        gDigiLiveRxCadenceResetCount++;
+    }
+    for (uint32_t i = 0; i < kDigiLiveRxCadencePeriodPackets; ++i) {
+        gDigiLiveRxCadencePeriod[i] = 0;
+    }
+    gDigiLiveRxCadencePeriodCount = 0;
+    gDigiLiveRxCadenceObservedTotalDataBlocks = 0;
+    gDigiLiveRxCadenceFirstDataBlocks = 0;
+    gDigiLiveRxCadenceLastDataBlocks = 0;
+    gDigiLiveRxCadenceBestPhase = 0xffffffff;
+    gDigiLiveRxCadenceBestPhaseMismatchCount = 0xffffffff;
+}
+
+void
+RecordDigiLiveRxCadencePacket(uint32_t eventCount, bool continuous)
+{
+    if (gDigiLiveRxCadenceReady != 0) {
+        return;
+    }
+
+    if (eventCount != 5 && eventCount != 6) {
+        gDigiLiveRxCadenceInvalidCount++;
+        ResetDigiLiveRxCadenceCapture();
+        return;
+    }
+    if (!continuous) {
+        gDigiLiveRxCadenceDiscontinuityCount++;
+        ResetDigiLiveRxCadenceCapture();
+        return;
+    }
+
+    uint32_t index = gDigiLiveRxCadencePeriodCount;
+    gDigiLiveRxCadencePeriod[index] = static_cast<uint8_t>(eventCount);
+    gDigiLiveRxCadenceObservedTotalDataBlocks += eventCount;
+    if (index == 0) {
+        gDigiLiveRxCadenceFirstDataBlocks = eventCount;
+    }
+    gDigiLiveRxCadenceLastDataBlocks = eventCount;
+    if (eventCount != Digi00xDuplexDataBlocksForPacket(index)) {
+        gDigiLiveRxCadenceIdealMismatchCount++;
+    }
+
+    gDigiLiveRxCadencePeriodCount++;
+    if (gDigiLiveRxCadencePeriodCount >= kDigiLiveRxCadencePeriodPackets) {
+        if (gDigiLiveRxCadenceObservedTotalDataBlocks ==
+            kDigiLiveSequenceReplayPeriodDataBlocks44100) {
+            uint32_t bestMismatchCount = 0xffffffff;
+            uint32_t bestPhase = 0xffffffff;
+            for (uint32_t phase = 0; phase < kDigiLiveRxCadencePeriodPackets; ++phase) {
+                uint32_t mismatchCount = 0;
+                for (uint32_t packet = 0; packet < kDigiLiveRxCadencePeriodPackets; ++packet) {
+                    uint32_t idealPacket = (packet + phase) % kDigiLiveRxCadencePeriodPackets;
+                    if (gDigiLiveRxCadencePeriod[packet] !=
+                        Digi00xDuplexDataBlocksForPacket(idealPacket)) {
+                        mismatchCount++;
+                    }
+                }
+                if (mismatchCount < bestMismatchCount) {
+                    bestMismatchCount = mismatchCount;
+                    bestPhase = phase;
+                }
+            }
+            gDigiLiveRxCadenceBestPhase = bestPhase;
+            gDigiLiveRxCadenceBestPhaseMismatchCount = bestMismatchCount;
+            gDigiLiveRxCadenceReady = 1;
+        } else {
+            gDigiLiveRxCadenceBadTotalCount++;
+            gDigiLiveRxCadenceLastBadTotalDataBlocks =
+                gDigiLiveRxCadenceObservedTotalDataBlocks;
+            ResetDigiLiveRxCadenceCapture();
+        }
+    }
+}
+
 uint32_t
 DigiLiveCycleFromOHCITimestamp(uint32_t timestamp)
 {
@@ -1259,6 +1486,7 @@ DigiLiveNextCycle(uint32_t cycle)
 
 void
 UpdateDigiLiveReceiveTimingDiagnostics(volatile uint32_t * packetHeader,
+                                       uint32_t payloadBytes,
                                        uint32_t dataBlocks)
 {
     if (packetHeader == nullptr) {
@@ -1273,8 +1501,10 @@ UpdateDigiLiveReceiveTimingDiagnostics(volatile uint32_t * packetHeader,
     uint32_t cycle = DigiLiveCycleFromOHCITimestamp(timestamp);
     uint32_t cipHeader0 = ToBigEndian32(header2);
     uint32_t cipHeader1 = ToBigEndian32(header3);
-    uint32_t dbc = cipHeader0 & kDigi00xCIPDBCMask;
-    uint32_t syt = cipHeader1 & kDigi00xCIPSYTMask;
+    DigiLiveCIPHeader cip = ParseDigiLiveCIPHeader(cipHeader0, cipHeader1);
+    uint32_t eventBytes = cip.dbs * sizeof(uint32_t);
+    uint32_t eventCount = eventBytes != 0 ? payloadBytes / eventBytes : 0;
+    uint32_t payloadRemainder = eventBytes != 0 ? payloadBytes % eventBytes : payloadBytes;
 
     gDigiLiveRxHeader0Raw = header0;
     gDigiLiveRxHeader1Raw = header1;
@@ -1285,8 +1515,50 @@ UpdateDigiLiveReceiveTimingDiagnostics(volatile uint32_t * packetHeader,
     gDigiLiveRxCycle = cycle;
     gDigiLiveRxCIPHeader0 = cipHeader0;
     gDigiLiveRxCIPHeader1 = cipHeader1;
-    gDigiLiveRxDBC = dbc;
-    gDigiLiveRxSYT = syt;
+    gDigiLiveRxDBC = cip.dbc;
+    gDigiLiveRxSYT = cip.syt;
+    gDigiLiveRxSID = cip.sid;
+    gDigiLiveRxDBS = cip.dbs;
+    gDigiLiveRxSPH = cip.sph;
+    gDigiLiveRxFMT = cip.fmt;
+    gDigiLiveRxFDF = cip.fdf;
+    gDigiLiveRxEventCount = eventCount;
+    gDigiLiveRxPayloadRemainderBytes = payloadRemainder;
+    gDigiLiveRxStreamProcessorPacketCount++;
+
+    if (payloadRemainder == 0 &&
+        cip.dbs == kDigi00xDuplexDataBlockQuadlets &&
+        cip.fmt == kDigi00xCIPFMTAM824 &&
+        cip.fdf == kDigi00xDuplexCIPSFC44100 &&
+        cip.sph == 0) {
+        gDigiLiveRxStreamProcessorValidPacketCount++;
+    }
+    if (payloadRemainder != 0) {
+        gDigiLiveRxPayloadRemainderCount++;
+    }
+    if (gDigiLiveRxExpectedSID == 0xffffffff) {
+        gDigiLiveRxExpectedSID = cip.sid;
+    } else if (cip.sid != gDigiLiveRxExpectedSID) {
+        gDigiLiveRxUnexpectedSIDCount++;
+    }
+    if (cip.dbs != kDigi00xDuplexDataBlockQuadlets) {
+        gDigiLiveRxUnexpectedDBSCount++;
+    }
+    if (cip.sph != 0) {
+        gDigiLiveRxUnexpectedSPHCount++;
+    }
+    if (cip.fmt != kDigi00xCIPFMTAM824) {
+        gDigiLiveRxUnexpectedFMTCount++;
+    }
+    if (cip.fdf != kDigi00xDuplexCIPSFC44100) {
+        gDigiLiveRxUnexpectedFDFCount++;
+    }
+    if (eventCount < gDigiLiveRxMinEventCount) {
+        gDigiLiveRxMinEventCount = eventCount;
+    }
+    if (eventCount > gDigiLiveRxMaxEventCount) {
+        gDigiLiveRxMaxEventCount = eventCount;
+    }
 
     if (gDigiLiveRxExpectedCycle != 0xffffffff) {
         gDigiLiveRxCycleDelta = DigiLiveCycleDistance(gDigiLiveRxExpectedCycle, cycle);
@@ -1304,25 +1576,32 @@ UpdateDigiLiveReceiveTimingDiagnostics(volatile uint32_t * packetHeader,
 
     if (gDigiLiveRxExpectedDBC == 0xffffffff) {
         gDigiLiveRxDBCInitCount++;
-    } else if (dbc != gDigiLiveRxExpectedDBC) {
-        gDigiLiveRxDBCLostCount++;
+        gDigiLiveRxDBCDelta = 0;
+    } else {
+        gDigiLiveRxDBCDelta = DigiLiveDBCForwardDistance(gDigiLiveRxExpectedDBC, cip.dbc);
+        if (cip.dbc != gDigiLiveRxExpectedDBC) {
+            gDigiLiveRxDBCLostCount++;
+            if (gDigiLiveRxDBCDelta > gDigiLiveRxMaxDBCDelta) {
+                gDigiLiveRxMaxDBCDelta = gDigiLiveRxDBCDelta;
+            }
+        }
     }
     gDigiLiveRxDBCPacketCount++;
-    gDigiLiveRxExpectedDBC = (dbc + dataBlocks) & 0xffu;
+    gDigiLiveRxExpectedDBC = (cip.dbc + eventCount) & 0xffu;
 
-    if (syt == 0xffffu) {
+    if (cip.syt == 0xffffu) {
         gDigiLiveRxSYTNoInfoCount++;
-    } else if (syt == 0) {
+    } else if (cip.syt == 0) {
         gDigiLiveRxSYTZeroCount++;
     }
 
-    if (dataBlocks < (sizeof(gDigiLiveRxDataBlockHistogram) /
+    if (eventCount < (sizeof(gDigiLiveRxDataBlockHistogram) /
                       sizeof(gDigiLiveRxDataBlockHistogram[0]))) {
-        gDigiLiveRxDataBlockHistogram[dataBlocks]++;
+        gDigiLiveRxDataBlockHistogram[eventCount]++;
     } else {
         gDigiLiveRxUnexpectedDataBlockCount++;
     }
-    if (dataBlocks != 5 && dataBlocks != 6) {
+    if (eventCount != dataBlocks || (eventCount != 5 && eventCount != 6)) {
         gDigiLiveRxUnexpectedDataBlockCount++;
     }
 }
@@ -1359,7 +1638,7 @@ PublishAudioRuntimeDiagnostics()
         return;
     }
 
-    OSDictionary * properties = OSDictionary::withCapacity(256);
+    OSDictionary * properties = OSDictionary::withCapacity(384);
     if (properties == nullptr) {
         return;
     }
@@ -1731,8 +2010,55 @@ PublishAudioRuntimeDiagnostics()
     AddNumberProperty(properties, "ProbeDigiLiveRxCyclePacketCount", gDigiLiveRxCyclePacketCount, 64);
     AddNumberProperty(properties, "ProbeDigiLiveRxCIPHeader0", gDigiLiveRxCIPHeader0, 32);
     AddNumberProperty(properties, "ProbeDigiLiveRxCIPHeader1", gDigiLiveRxCIPHeader1, 32);
+    AddNumberProperty(properties, "ProbeDigiLiveRxSID", gDigiLiveRxSID, 32);
+    AddNumberProperty(properties, "ProbeDigiLiveRxExpectedSID", gDigiLiveRxExpectedSID, 32);
+    AddNumberProperty(properties, "ProbeDigiLiveRxDBS", gDigiLiveRxDBS, 32);
+    AddNumberProperty(properties, "ProbeDigiLiveRxSPH", gDigiLiveRxSPH, 32);
+    AddNumberProperty(properties, "ProbeDigiLiveRxFMT", gDigiLiveRxFMT, 32);
+    AddNumberProperty(properties, "ProbeDigiLiveRxFDF", gDigiLiveRxFDF, 32);
+    AddNumberProperty(properties, "ProbeDigiLiveRxEventCount", gDigiLiveRxEventCount, 32);
+    AddNumberProperty(properties, "ProbeDigiLiveRxMinEventCount", gDigiLiveRxMinEventCount, 32);
+    AddNumberProperty(properties, "ProbeDigiLiveRxMaxEventCount", gDigiLiveRxMaxEventCount, 32);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveRxPayloadRemainderBytes",
+                      gDigiLiveRxPayloadRemainderBytes,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveRxStreamProcessorPacketCount",
+                      gDigiLiveRxStreamProcessorPacketCount,
+                      64);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveRxStreamProcessorValidPacketCount",
+                      gDigiLiveRxStreamProcessorValidPacketCount,
+                      64);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveRxPayloadRemainderCount",
+                      gDigiLiveRxPayloadRemainderCount,
+                      64);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveRxUnexpectedSIDCount",
+                      gDigiLiveRxUnexpectedSIDCount,
+                      64);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveRxUnexpectedDBSCount",
+                      gDigiLiveRxUnexpectedDBSCount,
+                      64);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveRxUnexpectedSPHCount",
+                      gDigiLiveRxUnexpectedSPHCount,
+                      64);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveRxUnexpectedFMTCount",
+                      gDigiLiveRxUnexpectedFMTCount,
+                      64);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveRxUnexpectedFDFCount",
+                      gDigiLiveRxUnexpectedFDFCount,
+                      64);
     AddNumberProperty(properties, "ProbeDigiLiveRxDBC", gDigiLiveRxDBC, 32);
     AddNumberProperty(properties, "ProbeDigiLiveRxExpectedDBC", gDigiLiveRxExpectedDBC, 32);
+    AddNumberProperty(properties, "ProbeDigiLiveRxDBCDelta", gDigiLiveRxDBCDelta, 32);
+    AddNumberProperty(properties, "ProbeDigiLiveRxMaxDBCDelta", gDigiLiveRxMaxDBCDelta, 32);
     AddNumberProperty(properties, "ProbeDigiLiveRxDBCPacketCount", gDigiLiveRxDBCPacketCount, 64);
     AddNumberProperty(properties, "ProbeDigiLiveRxDBCLostCount", gDigiLiveRxDBCLostCount, 64);
     AddNumberProperty(properties, "ProbeDigiLiveRxDBCInitCount", gDigiLiveRxDBCInitCount, 64);
@@ -1753,6 +2079,66 @@ PublishAudioRuntimeDiagnostics()
                       "ProbeDigiLiveRxUnexpectedDataBlockCount",
                       gDigiLiveRxUnexpectedDataBlockCount,
                       64);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveRxCadencePeriodPackets",
+                      kDigiLiveRxCadencePeriodPackets,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveRxCadencePeriodCount",
+                      gDigiLiveRxCadencePeriodCount,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveRxCadenceReady",
+                      gDigiLiveRxCadenceReady,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveRxCadenceResetCount",
+                      gDigiLiveRxCadenceResetCount,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveRxCadenceInvalidCount",
+                      gDigiLiveRxCadenceInvalidCount,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveRxCadenceDiscontinuityCount",
+                      gDigiLiveRxCadenceDiscontinuityCount,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveRxCadenceObservedTotalDataBlocks",
+                      gDigiLiveRxCadenceObservedTotalDataBlocks,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveRxCadenceBadTotalCount",
+                      gDigiLiveRxCadenceBadTotalCount,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveRxCadenceLastBadTotalDataBlocks",
+                      gDigiLiveRxCadenceLastBadTotalDataBlocks,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveRxCadenceIdealMismatchCount",
+                      gDigiLiveRxCadenceIdealMismatchCount,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveRxCadenceBestPhase",
+                      gDigiLiveRxCadenceBestPhase,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveRxCadenceBestPhaseMismatchCount",
+                      gDigiLiveRxCadenceBestPhaseMismatchCount,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveRxCadenceFirstDataBlocks",
+                      gDigiLiveRxCadenceFirstDataBlocks,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveRxCadenceLastDataBlocks",
+                      gDigiLiveRxCadenceLastDataBlocks,
+                      32);
+    AddDataProperty(properties,
+                    "ProbeDigiLiveRxCadencePeriod",
+                    gDigiLiveRxCadencePeriod,
+                    sizeof(gDigiLiveRxCadencePeriod));
     AddNumberProperty(properties, "ProbeAudioRuntimeInputCallbackCount", gAudioInputCallbackCount, 32);
     AddNumberProperty(properties, "ProbeAudioRuntimeInputLastBufferFrameSize", gAudioInputLastBufferFrameSize, 32);
     AddNumberProperty(properties, "ProbeAudioRuntimeInputLastSampleTime", gAudioInputLastSampleTime, 64);
@@ -6140,6 +6526,7 @@ StartDigiLiveStreamForAudio()
     gDigiLiveLastHarvestBytes = 0;
     gDigiLiveLastHarvestPeakAbs = 0;
     gDigiLiveLastHarvestLabelMismatchCount = 0;
+    ResetDigiLiveReceiveStreamDiagnostics();
     ResetDigiLiveSequenceReplayState();
 
     kern_return_t ret = RunDigiLiveBeginTransactions();
@@ -6331,11 +6718,12 @@ HarvestDigiLiveIsoStream()
         gDigiLiveLastDescriptorPayloadResCount = payloadResCount;
         uint64_t dbcLostBefore = gDigiLiveRxDBCLostCount;
         uint64_t cycleLostBefore = gDigiLiveRxCycleLostCount;
-        UpdateDigiLiveReceiveTimingDiagnostics(packet.header, dataBlocks);
+        UpdateDigiLiveReceiveTimingDiagnostics(packet.header, payloadBytes, dataBlocks);
         bool continuousForReplay =
             gDigiLiveRxDBCLostCount == dbcLostBefore &&
             gDigiLiveRxCycleLostCount == cycleLostBefore;
-        RecordDigiLiveSequenceReplayPacket(dataBlocks, continuousForReplay);
+        RecordDigiLiveRxCadencePacket(gDigiLiveRxEventCount, continuousForReplay);
+        RecordDigiLiveSequenceReplayPacket(gDigiLiveRxEventCount, continuousForReplay);
 
         if (dataBlocks != 0) {
             volatile uint32_t * packetPayload = packet.payload;

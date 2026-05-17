@@ -8,7 +8,7 @@ Current active local version:
 
 - Driver: `com.axelheckert.driver.FireWireOHCIProbe`
 - Host app: `com.axelheckert.FireWireOHCIProbeLoader`
-- Version: `0.2.110/310`
+- Version: `0.2.114/314`
 - Team ID used locally: `7H3ND356AV`
 - Controller: `pci11c1,5901` / IEEE 1394 Open HCI
 
@@ -734,6 +734,84 @@ More frequent receive IRQ descriptors did not help; it caused underruns within t
 Captures/coreaudio-digi003-test-0.2.110-restored-after-irq4-10s.wav
 after_1s_repeated_frames=0
 last_5s_repeated_frames=0
+```
+
+### 0.2.112 ASFireWire-style stream diagnostics
+
+Added RX StreamProcessor diagnostics inspired by ASFireWire's IEC 61883 receive path:
+
+```text
+ProbeDigiLiveRxSID
+ProbeDigiLiveRxDBS
+ProbeDigiLiveRxSPH
+ProbeDigiLiveRxFMT
+ProbeDigiLiveRxFDF
+ProbeDigiLiveRxEventCount
+ProbeDigiLiveRxPayloadRemainderCount
+ProbeDigiLiveRxStreamProcessorPacketCount
+ProbeDigiLiveRxStreamProcessorValidPacketCount
+ProbeDigiLiveRxDBCDelta
+ProbeDigiLiveRxMaxDBCDelta
+ProbeDigiLiveRxCadencePeriod
+ProbeDigiLiveRxCadenceBestPhase
+ProbeDigiLiveRxCadenceBestPhaseMismatchCount
+```
+
+10-second capture:
+
+```text
+Captures/coreaudio-digi003-test-0.2.112-streamphase-10s.wav
+after_1s_repeated_frames=0
+last_5s_repeated_frames=0
+ProbeDigiLiveRxCadenceBestPhase=51
+ProbeDigiLiveRxCadenceBestPhaseMismatchCount=0
+```
+
+30-second capture:
+
+```text
+Captures/coreaudio-digi003-test-0.2.112-streamphase-30s.wav
+repeated_frames=90875
+after_1s_repeated_frames=85892
+last_10s_repeated_frames=50808
+last_5s_repeated_frames=28484
+ProbeDigiLiveRxCadenceBestPhase=64
+ProbeDigiLiveRxCadenceBestPhaseMismatchCount=0
+ProbeDigiLiveRxDBCLostCount=23041
+ProbeDigiLiveRxCycleLostCount=23062
+ProbeDigiLiveIREmptyCatchUpCount=26644
+ProbeDigiLiveIREmptyCatchUpSkippedPackets=33633
+```
+
+Interpretation:
+
+The Digi 003 receive stream is the expected IEC 61883-6/AM824 layout: DBS 19, FMT 0x10, FDF 1, SPH 0, and a valid 80-packet / 441-data-block cadence. The cadence can start at different phases, so the phase-aligned mismatch counter is the useful check. The remaining 30-second failure is not caused by unknown sample cadence; it is still a live IR harvest continuity problem.
+
+### 0.2.113 receive command-pointer catchup disabled rejection
+
+A/B test disabling `kDigiLiveIRCommandPtrCatchUpEnabled`.
+
+```text
+Captures/coreaudio-digi003-test-0.2.113-catchup-off-10s.wav
+repeated_frames=202007
+after_1s_repeated_frames=196508
+last_5s_repeated_frames=122786
+ProbeAudioRuntimeRingUnderrunFrames=180421
+ProbeDigiLiveIRBacklogPackets=58333
+ProbeDigiLiveIREmptyCatchUpCount=0
+```
+
+Interpretation:
+
+Disabling catchup is clearly worse. It prevents skipped-packet correction, but the software cursor then falls far behind and the audio ring starves. Version `0.2.114/314` restores catchup enabled and keeps only the stream diagnostics.
+
+0.2.114 restored control capture:
+
+```text
+Captures/coreaudio-digi003-test-0.2.114-restored-streamdiag-10s.wav
+after_1s_repeated_frames=0
+last_5s_repeated_frames=0
+ProbeDigiLiveIRCommandPtrCatchUpEnabled=1
 ```
 
 ## Local Automation Notes
