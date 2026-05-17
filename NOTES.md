@@ -1908,6 +1908,51 @@ Live test results:
   `ProbeAudioRuntimeOutputRingOverrunFrames=0`, and
   `ProbeDigiLiveOutputCursorCatchUpCount=0`.
 
+## 0.2.163 Eight Channel-Strip Control State
+
+Generalizes the channel-strip mapping from channel 1 to all 8 fader strips.
+
+Observed channel-strip encoding:
+
+```text
+note 0x00 = SELECT
+note 0x01 = SOLO
+note 0x02 = MUTE
+note 0x03 = FADER TOUCH
+data2 bit 0..2 = channel index 0..7
+data2 bit 6    = pressed/touched
+fader CC low 3 bits = channel index 0..7
+```
+
+The driver now publishes per-channel strip diagnostics:
+
+```text
+ProbeControlStateChannel1SelectPressed .. ProbeControlStateChannel8SelectPressed
+ProbeControlStateChannel1SoloPressed   .. ProbeControlStateChannel8SoloPressed
+ProbeControlStateChannel1MutePressed   .. ProbeControlStateChannel8MutePressed
+ProbeControlStateChannel1FaderTouched  .. ProbeControlStateChannel8FaderTouched
+ProbeControlStateChannel1FaderValue    .. ProbeControlStateChannel8FaderValue
+ProbeControlStateChannel1FaderUpdateCount .. ProbeControlStateChannel8FaderUpdateCount
+```
+
+`Tools/live-control-monitor.py` provides a live view of decoded control
+messages and now labels channel-strip events such as `CH8 SOLO`, `CH8 MUTE`,
+and `CH8 FADER MOVE`.
+
+Live test results:
+
+- Channel 8 SELECT/SOLO/MUTE decoded as `90 00/01/02 47` press and
+  `90 00/01/02 07` release.
+- Channel 8 fader touch decoded as `90 03 47` press and `90 03 07` release.
+- Channel 8 fader movement used CC values with low bits `7`, e.g.
+  `B0 2f 00`, `B0 1f 02`, `B0 07 05`, and so on.
+- The channel-8 run produced `59` mapped messages with `0` unknowns and
+  `0` feedback drops.
+- Audio output counters stayed clean:
+  `ProbeAudioRuntimeOutputRingUnderrunFrames=0`,
+  `ProbeAudioRuntimeOutputRingOverrunFrames=0`, and
+  `ProbeDigiLiveOutputCursorCatchUpCount=0`.
+
 ## Async Control Reference
 
 The Rust `firewire-digi00x-protocols` crate is supplemental runtime code for internal functions outside the isochronous packet stream. It is useful for later mixer/control-surface work, but it does not solve the current live RX harvest issue.

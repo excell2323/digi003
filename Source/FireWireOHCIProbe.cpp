@@ -231,14 +231,19 @@ constexpr uint32_t kDigiLiveMidiDecodedFeedbackEnabled = 1;
 constexpr uint32_t kDigiLiveMidiEchoToOutputEnabled = 1;
 constexpr uint32_t kDigiLiveMidiEchoConsolePortOnlyEnabled = 1;
 constexpr uint32_t kDigiLiveMidiEchoQueueSize = 1024;
+constexpr uint32_t kDigiLiveControlChannelStripCount = 8;
 constexpr uint32_t kDigiLiveControlKindUnknown = 0;
-constexpr uint32_t kDigiLiveControlKindSelect1 = 1;
-constexpr uint32_t kDigiLiveControlKindFader1Touch = 2;
-constexpr uint32_t kDigiLiveControlKindFader1Move = 3;
-constexpr uint32_t kDigiLiveControlKindStop = 4;
-constexpr uint32_t kDigiLiveControlKindPlay = 5;
-constexpr uint32_t kDigiLiveControlNoteSelect1 = 0x00;
-constexpr uint32_t kDigiLiveControlNoteFader1Touch = 0x03;
+constexpr uint32_t kDigiLiveControlKindChannelSelect = 1;
+constexpr uint32_t kDigiLiveControlKindChannelSolo = 2;
+constexpr uint32_t kDigiLiveControlKindChannelMute = 3;
+constexpr uint32_t kDigiLiveControlKindChannelFaderTouch = 4;
+constexpr uint32_t kDigiLiveControlKindChannelFaderMove = 5;
+constexpr uint32_t kDigiLiveControlKindStop = 6;
+constexpr uint32_t kDigiLiveControlKindPlay = 7;
+constexpr uint32_t kDigiLiveControlNoteChannelSelect = 0x00;
+constexpr uint32_t kDigiLiveControlNoteChannelSolo = 0x01;
+constexpr uint32_t kDigiLiveControlNoteChannelMute = 0x02;
+constexpr uint32_t kDigiLiveControlNoteChannelFaderTouch = 0x03;
 constexpr uint32_t kDigiLiveControlNoteStop = 0x09;
 constexpr uint32_t kDigiLiveControlNotePlay = 0x0a;
 constexpr uint32_t kDigi00xDuplexCIPSFC44100 = 1;
@@ -1225,6 +1230,14 @@ uint32_t gDigiLiveMidiDecodedRecentMessages[kDigiLiveMidiDecodedRecentMessageCou
 uint64_t gDigiLiveControlMappedMessageCount = 0;
 uint64_t gDigiLiveControlUnknownMessageCount = 0;
 uint32_t gDigiLiveControlLastMappedKind = kDigiLiveControlKindUnknown;
+uint32_t gDigiLiveControlLastMappedChannel = 0xffffffff;
+uint32_t gDigiLiveControlChannelSelectPressed[kDigiLiveControlChannelStripCount] = {};
+uint32_t gDigiLiveControlChannelSoloPressed[kDigiLiveControlChannelStripCount] = {};
+uint32_t gDigiLiveControlChannelMutePressed[kDigiLiveControlChannelStripCount] = {};
+uint32_t gDigiLiveControlChannelFaderTouched[kDigiLiveControlChannelStripCount] = {};
+uint32_t gDigiLiveControlChannelFaderControlNumber[kDigiLiveControlChannelStripCount] = {};
+uint32_t gDigiLiveControlChannelFaderValue[kDigiLiveControlChannelStripCount] = {};
+uint64_t gDigiLiveControlChannelFaderUpdateCount[kDigiLiveControlChannelStripCount] = {};
 uint32_t gDigiLiveControlSelect1Pressed = 0;
 uint32_t gDigiLiveControlFader1Touched = 0;
 uint32_t gDigiLiveControlFader1ControlNumber = 0;
@@ -1592,6 +1605,7 @@ PublishDigiLiveControlDiagnostics(uint32_t rawWordBE,
     AddNumberProperty(properties, "ProbeControlStateMappedMessageCount", gDigiLiveControlMappedMessageCount, 64);
     AddNumberProperty(properties, "ProbeControlStateUnknownMessageCount", gDigiLiveControlUnknownMessageCount, 64);
     AddNumberProperty(properties, "ProbeControlStateLastMappedKind", gDigiLiveControlLastMappedKind, 32);
+    AddNumberProperty(properties, "ProbeControlStateLastMappedChannel", gDigiLiveControlLastMappedChannel, 32);
     AddNumberProperty(properties, "ProbeControlStateSelect1Pressed", gDigiLiveControlSelect1Pressed, 32);
     AddNumberProperty(properties, "ProbeControlStateFader1Touched", gDigiLiveControlFader1Touched, 32);
     AddNumberProperty(properties,
@@ -1605,6 +1619,51 @@ PublishDigiLiveControlDiagnostics(uint32_t rawWordBE,
                       64);
     AddNumberProperty(properties, "ProbeControlStateStopPressed", gDigiLiveControlStopPressed, 32);
     AddNumberProperty(properties, "ProbeControlStatePlayPressed", gDigiLiveControlPlayPressed, 32);
+    for (uint32_t i = 0; i < kDigiLiveControlChannelStripCount; ++i) {
+        uint32_t channel = i + 1;
+        AddIndexedNumberProperty(properties,
+                                 "ProbeControlStateChannel",
+                                 channel,
+                                 "SelectPressed",
+                                 gDigiLiveControlChannelSelectPressed[i],
+                                 32);
+        AddIndexedNumberProperty(properties,
+                                 "ProbeControlStateChannel",
+                                 channel,
+                                 "SoloPressed",
+                                 gDigiLiveControlChannelSoloPressed[i],
+                                 32);
+        AddIndexedNumberProperty(properties,
+                                 "ProbeControlStateChannel",
+                                 channel,
+                                 "MutePressed",
+                                 gDigiLiveControlChannelMutePressed[i],
+                                 32);
+        AddIndexedNumberProperty(properties,
+                                 "ProbeControlStateChannel",
+                                 channel,
+                                 "FaderTouched",
+                                 gDigiLiveControlChannelFaderTouched[i],
+                                 32);
+        AddIndexedNumberProperty(properties,
+                                 "ProbeControlStateChannel",
+                                 channel,
+                                 "FaderControlNumber",
+                                 gDigiLiveControlChannelFaderControlNumber[i],
+                                 32);
+        AddIndexedNumberProperty(properties,
+                                 "ProbeControlStateChannel",
+                                 channel,
+                                 "FaderValue",
+                                 gDigiLiveControlChannelFaderValue[i],
+                                 32);
+        AddIndexedNumberProperty(properties,
+                                 "ProbeControlStateChannel",
+                                 channel,
+                                 "FaderUpdateCount",
+                                 gDigiLiveControlChannelFaderUpdateCount[i],
+                                 64);
+    }
     AddNumberProperty(properties,
                       "ProbeControlRawFragmentEchoEnabled",
                       kDigiLiveMidiRawFragmentEchoEnabled,
@@ -1687,29 +1746,63 @@ ObserveDigiLiveMappedControlState(uint32_t portNibble,
 
     if (command == 0x90u) {
         uint32_t pressed = (data2 & 0x40u) != 0 ? 1u : 0u;
-        if (data1 == kDigiLiveControlNoteSelect1) {
-            gDigiLiveControlSelect1Pressed = pressed;
-            gDigiLiveControlLastMappedKind = kDigiLiveControlKindSelect1;
+        uint32_t channel = data2 & 0x07u;
+        if (data1 == kDigiLiveControlNoteChannelSelect &&
+            channel < kDigiLiveControlChannelStripCount) {
+            gDigiLiveControlChannelSelectPressed[channel] = pressed;
+            gDigiLiveControlLastMappedKind = kDigiLiveControlKindChannelSelect;
+            gDigiLiveControlLastMappedChannel = channel;
+            if (channel == 0) {
+                gDigiLiveControlSelect1Pressed = pressed;
+            }
             mapped = true;
-        } else if (data1 == kDigiLiveControlNoteFader1Touch) {
-            gDigiLiveControlFader1Touched = pressed;
-            gDigiLiveControlLastMappedKind = kDigiLiveControlKindFader1Touch;
+        } else if (data1 == kDigiLiveControlNoteChannelSolo &&
+                   channel < kDigiLiveControlChannelStripCount) {
+            gDigiLiveControlChannelSoloPressed[channel] = pressed;
+            gDigiLiveControlLastMappedKind = kDigiLiveControlKindChannelSolo;
+            gDigiLiveControlLastMappedChannel = channel;
+            mapped = true;
+        } else if (data1 == kDigiLiveControlNoteChannelMute &&
+                   channel < kDigiLiveControlChannelStripCount) {
+            gDigiLiveControlChannelMutePressed[channel] = pressed;
+            gDigiLiveControlLastMappedKind = kDigiLiveControlKindChannelMute;
+            gDigiLiveControlLastMappedChannel = channel;
+            mapped = true;
+        } else if (data1 == kDigiLiveControlNoteChannelFaderTouch &&
+                   channel < kDigiLiveControlChannelStripCount) {
+            gDigiLiveControlChannelFaderTouched[channel] = pressed;
+            gDigiLiveControlLastMappedKind = kDigiLiveControlKindChannelFaderTouch;
+            gDigiLiveControlLastMappedChannel = channel;
+            if (channel == 0) {
+                gDigiLiveControlFader1Touched = pressed;
+            }
             mapped = true;
         } else if (data1 == kDigiLiveControlNoteStop) {
             gDigiLiveControlStopPressed = pressed;
             gDigiLiveControlLastMappedKind = kDigiLiveControlKindStop;
+            gDigiLiveControlLastMappedChannel = 0xffffffff;
             mapped = true;
         } else if (data1 == kDigiLiveControlNotePlay) {
             gDigiLiveControlPlayPressed = pressed;
             gDigiLiveControlLastMappedKind = kDigiLiveControlKindPlay;
+            gDigiLiveControlLastMappedChannel = 0xffffffff;
             mapped = true;
         }
-    } else if (command == 0xb0u) {
-        gDigiLiveControlFader1ControlNumber = data1;
-        gDigiLiveControlFader1Value = data2;
-        gDigiLiveControlFader1UpdateCount++;
-        gDigiLiveControlLastMappedKind = kDigiLiveControlKindFader1Move;
-        mapped = true;
+    } else if (command == 0xb0u && data1 <= 0x3fu) {
+        uint32_t channel = data1 & 0x07u;
+        if (channel < kDigiLiveControlChannelStripCount) {
+            gDigiLiveControlChannelFaderControlNumber[channel] = data1;
+            gDigiLiveControlChannelFaderValue[channel] = data2;
+            gDigiLiveControlChannelFaderUpdateCount[channel]++;
+            gDigiLiveControlLastMappedKind = kDigiLiveControlKindChannelFaderMove;
+            gDigiLiveControlLastMappedChannel = channel;
+            if (channel == 0) {
+                gDigiLiveControlFader1ControlNumber = data1;
+                gDigiLiveControlFader1Value = data2;
+                gDigiLiveControlFader1UpdateCount++;
+            }
+            mapped = true;
+        }
     }
 
     if (mapped) {
@@ -2572,6 +2665,7 @@ PublishAudioRuntimeDiagnostics()
     AddNumberProperty(properties, "ProbeControlStateMappedMessageCount", gDigiLiveControlMappedMessageCount, 64);
     AddNumberProperty(properties, "ProbeControlStateUnknownMessageCount", gDigiLiveControlUnknownMessageCount, 64);
     AddNumberProperty(properties, "ProbeControlStateLastMappedKind", gDigiLiveControlLastMappedKind, 32);
+    AddNumberProperty(properties, "ProbeControlStateLastMappedChannel", gDigiLiveControlLastMappedChannel, 32);
     AddNumberProperty(properties, "ProbeControlStateSelect1Pressed", gDigiLiveControlSelect1Pressed, 32);
     AddNumberProperty(properties, "ProbeControlStateFader1Touched", gDigiLiveControlFader1Touched, 32);
     AddNumberProperty(properties,
@@ -2585,6 +2679,51 @@ PublishAudioRuntimeDiagnostics()
                       64);
     AddNumberProperty(properties, "ProbeControlStateStopPressed", gDigiLiveControlStopPressed, 32);
     AddNumberProperty(properties, "ProbeControlStatePlayPressed", gDigiLiveControlPlayPressed, 32);
+    for (uint32_t i = 0; i < kDigiLiveControlChannelStripCount; ++i) {
+        uint32_t channel = i + 1;
+        AddIndexedNumberProperty(properties,
+                                 "ProbeControlStateChannel",
+                                 channel,
+                                 "SelectPressed",
+                                 gDigiLiveControlChannelSelectPressed[i],
+                                 32);
+        AddIndexedNumberProperty(properties,
+                                 "ProbeControlStateChannel",
+                                 channel,
+                                 "SoloPressed",
+                                 gDigiLiveControlChannelSoloPressed[i],
+                                 32);
+        AddIndexedNumberProperty(properties,
+                                 "ProbeControlStateChannel",
+                                 channel,
+                                 "MutePressed",
+                                 gDigiLiveControlChannelMutePressed[i],
+                                 32);
+        AddIndexedNumberProperty(properties,
+                                 "ProbeControlStateChannel",
+                                 channel,
+                                 "FaderTouched",
+                                 gDigiLiveControlChannelFaderTouched[i],
+                                 32);
+        AddIndexedNumberProperty(properties,
+                                 "ProbeControlStateChannel",
+                                 channel,
+                                 "FaderControlNumber",
+                                 gDigiLiveControlChannelFaderControlNumber[i],
+                                 32);
+        AddIndexedNumberProperty(properties,
+                                 "ProbeControlStateChannel",
+                                 channel,
+                                 "FaderValue",
+                                 gDigiLiveControlChannelFaderValue[i],
+                                 32);
+        AddIndexedNumberProperty(properties,
+                                 "ProbeControlStateChannel",
+                                 channel,
+                                 "FaderUpdateCount",
+                                 gDigiLiveControlChannelFaderUpdateCount[i],
+                                 64);
+    }
     AddNumberProperty(properties,
                       "ProbeControlRawFragmentEchoEnabled",
                       kDigiLiveMidiRawFragmentEchoEnabled,
@@ -4104,6 +4243,16 @@ ConfigureAudioDevice(FireWireOHCIProbe * driver)
     gDigiLiveControlMappedMessageCount = 0;
     gDigiLiveControlUnknownMessageCount = 0;
     gDigiLiveControlLastMappedKind = kDigiLiveControlKindUnknown;
+    gDigiLiveControlLastMappedChannel = 0xffffffff;
+    for (uint32_t i = 0; i < kDigiLiveControlChannelStripCount; ++i) {
+        gDigiLiveControlChannelSelectPressed[i] = 0;
+        gDigiLiveControlChannelSoloPressed[i] = 0;
+        gDigiLiveControlChannelMutePressed[i] = 0;
+        gDigiLiveControlChannelFaderTouched[i] = 0;
+        gDigiLiveControlChannelFaderControlNumber[i] = 0;
+        gDigiLiveControlChannelFaderValue[i] = 0;
+        gDigiLiveControlChannelFaderUpdateCount[i] = 0;
+    }
     gDigiLiveControlSelect1Pressed = 0;
     gDigiLiveControlFader1Touched = 0;
     gDigiLiveControlFader1ControlNumber = 0;
