@@ -8,7 +8,7 @@ Current active local version:
 
 - Driver: `com.axelheckert.driver.FireWireOHCIProbe`
 - Host app: `com.axelheckert.FireWireOHCIProbeLoader`
-- Version: `0.2.108/308`
+- Version: `0.2.110/310`
 - Team ID used locally: `7H3ND356AV`
 - Controller: `pci11c1,5901` / IEEE 1394 Open HCI
 
@@ -707,6 +707,31 @@ Removing callback harvest eliminates worker/callback contention, but it does not
 
 ```text
 Captures/coreaudio-digi003-test-0.2.108-restored-after-worker-only-10s.wav
+after_1s_repeated_frames=0
+last_5s_repeated_frames=0
+```
+
+### 0.2.109 receive IRQ interval 4 rejection
+
+This reduced `kDigiLiveReceiveIRQInterval` from 8 to 4 to test whether more frequent receive events would reduce event-gate misses and late ring starvation.
+
+```text
+Captures/coreaudio-digi003-test-0.2.109-irq4-10s.wav
+after_1s_repeated_frames=1272
+last_5s_repeated_frames=1272
+ring_underrun_frames=3235
+ir_event_gate_skip_count=2418
+drain_busy_count=1742
+```
+
+Interpretation:
+
+More frequent receive IRQ descriptors did not help; it caused underruns within the 10-second run. Version 0.2.110 restores the 8-packet receive IRQ interval.
+
+0.2.110 control capture:
+
+```text
+Captures/coreaudio-digi003-test-0.2.110-restored-after-irq4-10s.wav
 after_1s_repeated_frames=0
 last_5s_repeated_frames=0
 ```
