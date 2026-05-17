@@ -4121,11 +4121,12 @@ AppendDigiLiveMovingReplayPacket(uint32_t dataBlocks, bool continuous)
 void
 RecordDigiLiveSequenceReplayPacket(uint32_t dataBlocks, bool continuous)
 {
+    if (kDigiLiveSequenceReplayMovingEnabled != 0) {
+        AppendDigiLiveMovingReplayPacket(dataBlocks, continuous);
+    }
+
     if (kDigiLiveSequenceReplayEnabled == 0 ||
         gDigiLiveSequenceReplayActive != 0) {
-        if (gDigiLiveSequenceReplayActive != 0) {
-            AppendDigiLiveMovingReplayPacket(dataBlocks, continuous);
-        }
         return;
     }
     if (gDigiLiveSequenceReplayReady != 0) {
@@ -4495,7 +4496,6 @@ kern_return_t
 RefreshDigiLiveMovingSequenceReplay()
 {
     if (kDigiLiveSequenceReplayMovingEnabled == 0 ||
-        gDigiLiveSequenceReplayActive == 0 ||
         gDigiLiveRunning == 0 ||
         gDigiLiveBuffer.cpuRange.address == 0 ||
         gDigiLiveBuffer.command == nullptr ||
@@ -6420,7 +6420,7 @@ HarvestDigiLiveIsoStream()
     }
 
     if (packetCount != 0) {
-        if (gDigiLiveSequenceReplayActive != 0) {
+        if (kDigiLiveSequenceReplayMovingEnabled != 0) {
             (void)RefreshDigiLiveMovingSequenceReplay();
         }
         gDigiLiveSyncForDeviceRet =

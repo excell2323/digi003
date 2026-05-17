@@ -8,7 +8,7 @@ Current active local version:
 
 - Driver: `com.axelheckert.driver.FireWireOHCIProbe`
 - Host app: `com.axelheckert.FireWireOHCIProbeLoader`
-- Version: `0.2.104/304`
+- Version: `0.2.106/306`
 - Team ID used locally: `7H3ND356AV`
 - Controller: `pci11c1,5901` / IEEE 1394 Open HCI
 
@@ -648,6 +648,35 @@ The targeted bypass did not rescue late underruns; once the ring went low it tri
 
 ```text
 Captures/coreaudio-digi003-test-0.2.104-restored-after-lowwater-10s.wav
+after_1s_repeated_frames=0
+last_5s_repeated_frames=0
+```
+
+### 0.2.105 moving-only sequence replay rejection
+
+This attempted Linux-style moving sequence replay without the older stop/restart apply path. RX packet data-block counts were queued continuously and future TX descriptors were updated while the stream was running.
+
+```text
+Captures/coreaudio-digi003-test-0.2.105-moving-only-10s.wav
+nonzero_frames=0
+total_repeated_frames=440999
+moving_append_count=22057
+moving_update_success_count=4
+moving_bad_command_ptr_count=1022
+moving_bad_total_count=89
+ring_underrun_frames=319812
+rx_dbc_lost_count=1715
+rx_cycle_lost_count=1717
+```
+
+Interpretation:
+
+Updating future TX descriptors while running is still conceptually the right Linux-shaped direction, but this implementation is not safe: it often cannot map the live IT command pointer and collapses capture to silence. Version 0.2.106 restores the moving-replay-disabled baseline while keeping the code path available for a more careful rework.
+
+0.2.106 control capture:
+
+```text
+Captures/coreaudio-digi003-test-0.2.106-restored-after-moving-10s.wav
 after_1s_repeated_frames=0
 last_5s_repeated_frames=0
 ```
