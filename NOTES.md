@@ -8,7 +8,7 @@ Current active local version:
 
 - Driver: `com.axelheckert.driver.FireWireOHCIProbe`
 - Host app: `com.axelheckert.FireWireOHCIProbeLoader`
-- Version: `0.2.100/300`
+- Version: `0.2.102/302`
 - Team ID used locally: `7H3ND356AV`
 - Controller: `pci11c1,5901` / IEEE 1394 Open HCI
 
@@ -589,6 +589,38 @@ after_1s_repeated_frames=0
 last_5s_repeated_frames=0
 ring_underrun_frames=0
 ```
+
+### 0.2.101 event-gate off rejection
+
+This repeated the older event-gate bypass idea on the fast-init/full-sync baseline by setting `kDigiLiveRequireIREventBeforeSync = 0`.
+
+```text
+Captures/coreaudio-digi003-test-0.2.101-eventgate-off-10s.wav
+after_1s_repeated_frames=4305
+last_5s_repeated_frames=4305
+ring_underrun_frames=9741
+rx_dbc_lost_count=11411
+rx_cycle_lost_count=11419
+```
+
+Interpretation:
+
+Bypassing the IR event gate is worse than the 0.2.100 baseline, which had no repeats after the first second in the 10-second test. Version 0.2.102 restores the event-gated fast-init baseline with only the version number advanced so macOS can upgrade the installed system extension cleanly.
+
+### 0.2.102 restored event-gated fast-init baseline
+
+This is the current installed checkpoint. It restores `kDigiLiveRequireIREventBeforeSync = 1`, keeps sequence replay disabled, keeps catch-up at 8 packets, and keeps fast init enabled.
+
+```text
+Captures/coreaudio-digi003-test-0.2.102-restored-eventgate-10s.wav
+after_1s_repeated_frames=0
+last_5s_repeated_frames=0
+ring_underrun_frames=0
+```
+
+Interpretation:
+
+This returns the short-run capture behavior to the usable 0.2.100 shape after the rejected 0.2.101 event-gate bypass test.
 
 ## Local Automation Notes
 
