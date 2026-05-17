@@ -814,6 +814,149 @@ last_5s_repeated_frames=0
 ProbeDigiLiveIRCommandPtrCatchUpEnabled=1
 ```
 
+### 0.2.115 segment catchup rejection
+
+Added a segment catchup experiment that only advances the software IR cursor when an
+8-packet run is ready. This was inspired by ASFireWire's sequential IR drain model,
+but it performs worse on the current Digi 003 path.
+
+```text
+Captures/coreaudio-digi003-test-0.2.115-segment-catchup-10s.wav
+repeated_frames=12791
+after_1s_repeated_frames=9008
+last_5s_repeated_frames=9008
+ProbeDigiLiveIRSegmentCatchUpAttemptCount=6143
+ProbeDigiLiveIRSegmentCatchUpSuccessCount=4112
+ProbeDigiLiveIRSegmentCatchUpFailureCount=2031
+ProbeAudioRuntimeRingRepeatedFrames=7083
+```
+
+Interpretation:
+
+Segment-level catchup is too conservative for the current polling loop. It reduces
+some speculative reads, but it also delays the software cursor enough to create
+audible repeats inside a 10-second capture. The code remains present for diagnostics
+and disabled by default.
+
+### 0.2.116 segment catchup disabled control
+
+Disabled the segment-catchup experiment and restored the 0.2.114 cursor behavior.
+
+```text
+Captures/coreaudio-digi003-test-0.2.116-segment-disabled-10s.wav
+repeated_frames=5615
+after_1s_repeated_frames=0
+after_2s_repeated_frames=0
+last_5s_repeated_frames=0
+ProbeDigiLiveIRSegmentCatchUpEnabled=0
+ProbeAudioRuntimeRingUnderrunFrames=0
+```
+
+30-second capture:
+
+```text
+Captures/coreaudio-digi003-test-0.2.116-segment-disabled-30s.wav
+repeated_frames=67197
+after_1s_repeated_frames=61682
+last_10s_repeated_frames=36786
+last_5s_repeated_frames=21962
+ProbeAudioRuntimeRingUnderrunFrames=76162
+ProbeDigiLiveRxDBCLostCount=23086
+ProbeDigiLiveRxCycleLostCount=23100
+```
+
+Interpretation:
+
+The short run is clean after the initial start-up fill, but the long run still
+starves. This confirms the remaining issue is long-run harvest scheduling/latency,
+not the IEC 61883 cadence parser.
+
+### 0.2.117 RX payload range sync rejection
+
+Added descriptor and payload-range DMA sync diagnostics to test whether the DriverKit
+full-buffer sync was too expensive. The active experiment synced descriptor memory
+first, then only the packet payload before parsing.
+
+```text
+Captures/coreaudio-digi003-test-0.2.117-rx-range-sync-10s.wav
+repeated_frames=432806
+after_1s_repeated_frames=396900
+last_5s_repeated_frames=220500
+ProbeDigiLiveHarvestPacketCount=2042
+ProbeAudioRuntimeRingRepeatedFrames=430305
+ProbeDigiLiveRxDescriptorSyncCount=17406
+ProbeDigiLiveRxPayloadSyncCount=2042
+```
+
+Interpretation:
+
+Per-payload range sync in the hot path is not viable here. The harvest loop falls
+behind almost immediately. Version 0.2.118 restores full-buffer sync for safety while
+keeping the sync diagnostics.
+
+### 0.2.118 full-sync restore and ASFireWire comparison
+
+Restored the safe receive DMA mode:
+
+```text
+ProbeDigiLiveReceiveFullBufferSyncEnabled=1
+ProbeDigiLiveReceivePayloadRangeSyncEnabled=0
+ProbeDigiLiveIRSegmentCatchUpEnabled=0
+```
+
+10-second capture:
+
+```text
+Captures/coreaudio-digi003-test-0.2.118-fullsync-restore-10s.wav
+repeated_frames=5327
+after_1s_repeated_frames=0
+after_2s_repeated_frames=0
+last_5s_repeated_frames=0
+ProbeAudioRuntimeRingUnderrunFrames=0
+```
+
+30-second capture:
+
+```text
+Captures/coreaudio-digi003-test-0.2.118-fullsync-restore-30s.wav
+repeated_frames=63431
+after_1s_repeated_frames=58368
+after_2s_repeated_frames=58368
+last_10s_repeated_frames=32192
+last_5s_repeated_frames=15680
+ProbeAudioRuntimeRingUnderrunFrames=75817
+ProbeDigiLiveRxDBCLostCount=23047
+ProbeDigiLiveRxCycleLostCount=23070
+ProbeDigiLiveIREmptyCatchUpCount=26858
+ProbeDigiLiveRxDescriptorSyncBytes=53200551936
+```
+
+ASFireWire status and lessons:
+
+- DeepWiki says ASFireWire has working OHCI init, DMA management, interrupt
+  dispatch, bus reset/self-ID, async transactions, isoch transmit, AV/C, IRM, and CMP.
+- Their isoch transmit path is functional; isoch receive is explicitly still in
+  progress, with basic DMA setup complete and experimental stream processing.
+- Their receive model is still useful: OHCI IR ring -> sequential completed-descriptor
+  drain -> IEC 61883/CIP validation -> AM824 decode -> CoreAudio queue.
+- The major architectural difference from our current Digi path is interrupt-driven
+  IR draining. ASFireWire dispatches OHCI interrupt snapshots and handles IsoRecv
+  context events; our current successful short-run path still depends heavily on
+  polling from the CoreAudio callback and refresh worker.
+
+References:
+
+- https://deepwiki.com/mrmidi/ASFireWire/1-home
+- https://deepwiki.com/mrmidi/ASFireWire/2.5-isochronous-audio-stack
+- https://deepwiki.com/mrmidi/ASFireWire/5.2-iec-61883-audio-streaming
+
+Next experiment:
+
+Add a DriverKit `IOInterruptDispatchSource` path for the OHCI device and call the
+Digi RX harvester when the IsoRecv context bit fires. The goal is to move harvest
+cadence closer to the FireWire bus instead of depending primarily on CoreAudio/worker
+polling.
+
 ## Local Automation Notes
 
 A narrow local sudoers rule is installed at `/etc/sudoers.d/firewire-ohci-probe` so Codex can continue DriverKit upgrade loops without repeated password prompts. It permits only:
@@ -875,8 +1018,8 @@ monitor source stride                = 8
 
 ## Next Work
 
-1. Replace the raw callback harvest-depth experiment with timing-aware harvest/backpressure so the ring stays above the callback request during active capture.
-2. Distinguish active-capture underrun from post-capture ring fill in diagnostics.
-3. Reduce RX DBC/cycle lost counts now that harvest throughput is near real-time.
+1. Add interrupt-driven Digi RX harvest based on OHCI IsoRecv context events.
+2. Reduce RX DBC/cycle lost counts and 30-second underruns.
+3. Keep active-capture underrun diagnostics separate from post-capture ring fill.
 4. Add Digi "double-oh-three" playback encoding before enabling non-silent output.
 5. Add MIDI/control-surface and mixer/control support after audio input stability improves.

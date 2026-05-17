@@ -239,6 +239,11 @@ constexpr uint32_t kDigiLiveIRCommandPtrCatchUpEnabled = 1;
 constexpr uint32_t kDigiLiveIRCommandPtrCatchUpMinPackets = 8;
 constexpr uint32_t kDigiLiveIRCommandPtrCatchUpScanEnabled = 1;
 constexpr uint32_t kDigiLiveIRCommandPtrCatchUpScanMaxPackets = 256;
+constexpr uint32_t kDigiLiveIRSegmentCatchUpEnabled = 0;
+constexpr uint32_t kDigiLiveIRSegmentCatchUpPacketCount = 8;
+constexpr uint32_t kDigiLiveIRSegmentCatchUpFallbackToSinglePacket = 1;
+constexpr uint32_t kDigiLiveReceiveFullBufferSyncEnabled = 1;
+constexpr uint32_t kDigiLiveReceivePayloadRangeSyncEnabled = 0;
 constexpr uint32_t kDigiLiveSingleIRDescriptorDataSize =
     kDigi00xDuplexIRHeaderSize + kDigi00xDuplexIRDescriptorDataSize;
 constexpr uint32_t kDigiLiveIRDescriptorDataStride =
@@ -1022,11 +1027,20 @@ uint64_t gDigiLiveIREmptyCatchUpSkippedPackets = 0;
 uint64_t gDigiLiveIREmptyCatchUpScanCount = 0;
 uint64_t gDigiLiveIREmptyCatchUpScanFoundCount = 0;
 uint64_t gDigiLiveIREmptyCatchUpScanPackets = 0;
+uint64_t gDigiLiveIRSegmentCatchUpAttemptCount = 0;
+uint64_t gDigiLiveIRSegmentCatchUpSuccessCount = 0;
+uint64_t gDigiLiveIRSegmentCatchUpFailureCount = 0;
+uint64_t gDigiLiveIRSegmentCatchUpScannedSegments = 0;
 uint32_t gDigiLiveIREmptyCatchUpLastFromIndex = 0xffffffff;
 uint32_t gDigiLiveIREmptyCatchUpLastToIndex = 0xffffffff;
 uint32_t gDigiLiveIREmptyCatchUpLastHardwareIndex = 0xffffffff;
 uint32_t gDigiLiveIREmptyCatchUpLastSkippedPackets = 0;
 uint32_t gDigiLiveIREmptyCatchUpLastScannedPackets = 0;
+uint32_t gDigiLiveIRSegmentCatchUpLastFromIndex = 0xffffffff;
+uint32_t gDigiLiveIRSegmentCatchUpLastToIndex = 0xffffffff;
+uint32_t gDigiLiveIRSegmentCatchUpLastHardwareIndex = 0xffffffff;
+uint32_t gDigiLiveIRSegmentCatchUpLastSkippedPackets = 0;
+uint32_t gDigiLiveIRSegmentCatchUpLastScannedSegments = 0;
 uint32_t gDigiLiveLastDescriptorIndex = 0xffffffff;
 uint32_t gDigiLiveLastDescriptorBytes = 0;
 uint32_t gDigiLiveLastDescriptorDataBlocks = 0;
@@ -1055,6 +1069,12 @@ uint64_t gDigiLiveSlot0NonzeroCount = 0;
 uint32_t gDigiLiveSyncForDeviceRet = static_cast<uint32_t>(kIOReturnNotReady);
 uint32_t gDigiLiveSyncForCPURet = static_cast<uint32_t>(kIOReturnNotReady);
 uint32_t gDigiLiveCompleteRet = static_cast<uint32_t>(kIOReturnNotReady);
+uint32_t gDigiLiveRxDescriptorSyncForCPURet = static_cast<uint32_t>(kIOReturnNotReady);
+uint32_t gDigiLiveRxPayloadSyncForCPURet = static_cast<uint32_t>(kIOReturnNotReady);
+uint64_t gDigiLiveRxDescriptorSyncCount = 0;
+uint64_t gDigiLiveRxDescriptorSyncBytes = 0;
+uint64_t gDigiLiveRxPayloadSyncCount = 0;
+uint64_t gDigiLiveRxPayloadSyncBytes = 0;
 uint32_t gDigiLiveXmitMaskSupport = 0;
 uint32_t gDigiLiveRecvMaskSupport = 0;
 uint32_t gDigiLiveXmitContextSupported = 0;
@@ -1714,6 +1734,15 @@ PublishAudioRuntimeDiagnostics()
     AddNumberProperty(properties, "ProbeDigiLiveIRCommandPtrCatchUpMinPackets", kDigiLiveIRCommandPtrCatchUpMinPackets, 32);
     AddNumberProperty(properties, "ProbeDigiLiveIRCommandPtrCatchUpScanEnabled", kDigiLiveIRCommandPtrCatchUpScanEnabled, 32);
     AddNumberProperty(properties, "ProbeDigiLiveIRCommandPtrCatchUpScanMaxPackets", kDigiLiveIRCommandPtrCatchUpScanMaxPackets, 32);
+    AddNumberProperty(properties, "ProbeDigiLiveIRSegmentCatchUpEnabled", kDigiLiveIRSegmentCatchUpEnabled, 32);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveIRSegmentCatchUpPacketCount",
+                      kDigiLiveIRSegmentCatchUpPacketCount,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveIRSegmentCatchUpFallbackToSinglePacket",
+                      kDigiLiveIRSegmentCatchUpFallbackToSinglePacket,
+                      32);
     AddNumberProperty(properties, "ProbeDigiLiveIRCommandPtrPacketIndex", gDigiLiveIRCommandPtrPacketIndex, 32);
     AddNumberProperty(properties, "ProbeDigiLiveIRHardwareCursorValid", gDigiLiveIRHardwareCursorValid, 32);
     AddNumberProperty(properties, "ProbeDigiLiveIRHardwarePacketCursor", gDigiLiveIRHardwarePacketCursor, 64);
@@ -1724,11 +1753,47 @@ PublishAudioRuntimeDiagnostics()
     AddNumberProperty(properties, "ProbeDigiLiveIREmptyCatchUpScanCount", gDigiLiveIREmptyCatchUpScanCount, 64);
     AddNumberProperty(properties, "ProbeDigiLiveIREmptyCatchUpScanFoundCount", gDigiLiveIREmptyCatchUpScanFoundCount, 64);
     AddNumberProperty(properties, "ProbeDigiLiveIREmptyCatchUpScanPackets", gDigiLiveIREmptyCatchUpScanPackets, 64);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveIRSegmentCatchUpAttemptCount",
+                      gDigiLiveIRSegmentCatchUpAttemptCount,
+                      64);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveIRSegmentCatchUpSuccessCount",
+                      gDigiLiveIRSegmentCatchUpSuccessCount,
+                      64);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveIRSegmentCatchUpFailureCount",
+                      gDigiLiveIRSegmentCatchUpFailureCount,
+                      64);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveIRSegmentCatchUpScannedSegments",
+                      gDigiLiveIRSegmentCatchUpScannedSegments,
+                      64);
     AddNumberProperty(properties, "ProbeDigiLiveIREmptyCatchUpLastFromIndex", gDigiLiveIREmptyCatchUpLastFromIndex, 32);
     AddNumberProperty(properties, "ProbeDigiLiveIREmptyCatchUpLastToIndex", gDigiLiveIREmptyCatchUpLastToIndex, 32);
     AddNumberProperty(properties, "ProbeDigiLiveIREmptyCatchUpLastHardwareIndex", gDigiLiveIREmptyCatchUpLastHardwareIndex, 32);
     AddNumberProperty(properties, "ProbeDigiLiveIREmptyCatchUpLastSkippedPackets", gDigiLiveIREmptyCatchUpLastSkippedPackets, 32);
     AddNumberProperty(properties, "ProbeDigiLiveIREmptyCatchUpLastScannedPackets", gDigiLiveIREmptyCatchUpLastScannedPackets, 32);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveIRSegmentCatchUpLastFromIndex",
+                      gDigiLiveIRSegmentCatchUpLastFromIndex,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveIRSegmentCatchUpLastToIndex",
+                      gDigiLiveIRSegmentCatchUpLastToIndex,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveIRSegmentCatchUpLastHardwareIndex",
+                      gDigiLiveIRSegmentCatchUpLastHardwareIndex,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveIRSegmentCatchUpLastSkippedPackets",
+                      gDigiLiveIRSegmentCatchUpLastSkippedPackets,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveIRSegmentCatchUpLastScannedSegments",
+                      gDigiLiveIRSegmentCatchUpLastScannedSegments,
+                      32);
     AddNumberProperty(properties, "ProbeDigiLiveLastDescriptorIndex", gDigiLiveLastDescriptorIndex, 32);
     AddNumberProperty(properties, "ProbeDigiLiveLastDescriptorBytes", gDigiLiveLastDescriptorBytes, 32);
     AddNumberProperty(properties, "ProbeDigiLiveLastDescriptorDataBlocks", gDigiLiveLastDescriptorDataBlocks, 32);
@@ -1760,6 +1825,38 @@ PublishAudioRuntimeDiagnostics()
     AddNumberProperty(properties, "ProbeDigiLiveSyncForDeviceRet", gDigiLiveSyncForDeviceRet, 32);
     AddNumberProperty(properties, "ProbeDigiLiveSyncForCPURet", gDigiLiveSyncForCPURet, 32);
     AddNumberProperty(properties, "ProbeDigiLiveCompleteRet", gDigiLiveCompleteRet, 32);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveReceiveFullBufferSyncEnabled",
+                      kDigiLiveReceiveFullBufferSyncEnabled,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveReceivePayloadRangeSyncEnabled",
+                      kDigiLiveReceivePayloadRangeSyncEnabled,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveRxDescriptorSyncForCPURet",
+                      gDigiLiveRxDescriptorSyncForCPURet,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveRxPayloadSyncForCPURet",
+                      gDigiLiveRxPayloadSyncForCPURet,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveRxDescriptorSyncCount",
+                      gDigiLiveRxDescriptorSyncCount,
+                      64);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveRxDescriptorSyncBytes",
+                      gDigiLiveRxDescriptorSyncBytes,
+                      64);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveRxPayloadSyncCount",
+                      gDigiLiveRxPayloadSyncCount,
+                      64);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveRxPayloadSyncBytes",
+                      gDigiLiveRxPayloadSyncBytes,
+                      64);
     AddNumberProperty(properties, "ProbeDigiLiveXmitMaskSupport", gDigiLiveXmitMaskSupport, 32);
     AddNumberProperty(properties, "ProbeDigiLiveRecvMaskSupport", gDigiLiveRecvMaskSupport, 32);
     AddNumberProperty(properties, "ProbeDigiLiveXmitContextSupported", gDigiLiveXmitContextSupported, 32);
@@ -2540,6 +2637,12 @@ ConfigureAudioDevice(FireWireOHCIProbe * driver)
     gDigiLiveSyncForDeviceRet = ReturnCodeToProperty(kIOReturnNotReady);
     gDigiLiveSyncForCPURet = ReturnCodeToProperty(kIOReturnNotReady);
     gDigiLiveCompleteRet = ReturnCodeToProperty(kIOReturnNotReady);
+    gDigiLiveRxDescriptorSyncForCPURet = ReturnCodeToProperty(kIOReturnNotReady);
+    gDigiLiveRxPayloadSyncForCPURet = ReturnCodeToProperty(kIOReturnNotReady);
+    gDigiLiveRxDescriptorSyncCount = 0;
+    gDigiLiveRxDescriptorSyncBytes = 0;
+    gDigiLiveRxPayloadSyncCount = 0;
+    gDigiLiveRxPayloadSyncBytes = 0;
     gDigiLiveXmitMaskSupport = 0;
     gDigiLiveRecvMaskSupport = 0;
     gDigiLiveXmitContextSupported = 0;
@@ -3181,6 +3284,24 @@ SyncDMABufferForCPU(DMABuffer * buffer, uint64_t size)
                                                              size,
                                                              0,
                                                              buffer->memory);
+    return buffer->syncForCPURet;
+}
+
+kern_return_t
+SyncDMABufferForCPURange(DMABuffer * buffer, uint64_t offset, uint64_t size)
+{
+    if (buffer->command == nullptr || buffer->memory == nullptr || buffer->completed != 0) {
+        return kIOReturnNotReady;
+    }
+    if (offset > buffer->cpuRange.length || size > buffer->cpuRange.length - offset) {
+        return kIOReturnBadArgument;
+    }
+
+    buffer->syncForCPURet = buffer->command->PerformOperation(kIODMACommandPerformOperationOptionRead,
+                                                              offset,
+                                                              size,
+                                                              0,
+                                                              buffer->memory);
     return buffer->syncForCPURet;
 }
 
@@ -4682,6 +4803,11 @@ ResetDigiLiveIRCommandPtrCursor()
     gDigiLiveIREmptyCatchUpLastHardwareIndex = 0xffffffff;
     gDigiLiveIREmptyCatchUpLastSkippedPackets = 0;
     gDigiLiveIREmptyCatchUpLastScannedPackets = 0;
+    gDigiLiveIRSegmentCatchUpLastFromIndex = 0xffffffff;
+    gDigiLiveIRSegmentCatchUpLastToIndex = 0xffffffff;
+    gDigiLiveIRSegmentCatchUpLastHardwareIndex = 0xffffffff;
+    gDigiLiveIRSegmentCatchUpLastSkippedPackets = 0;
+    gDigiLiveIRSegmentCatchUpLastScannedSegments = 0;
 }
 
 void
@@ -4741,12 +4867,127 @@ DigiLiveReceivePacketAtIndexIsEmpty(volatile OHCIAsyncDescriptor * ring,
 }
 
 bool
+DigiLiveReceiveSegmentAtCursorIsReady(volatile OHCIAsyncDescriptor * ring,
+                                      uint64_t bufferAddress,
+                                      uint64_t startCursor,
+                                      uint32_t packetCount)
+{
+    if (packetCount == 0) {
+        return false;
+    }
+
+    for (uint32_t offset = 0; offset < packetCount; ++offset) {
+        uint32_t index =
+            static_cast<uint32_t>((startCursor + offset) %
+                                  kDigi00xDuplexIRDescriptorCount);
+        if (DigiLiveReceivePacketAtIndexIsEmpty(ring, bufferAddress, index)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void
+UpdateDigiLiveIRBacklogAfterSoftwareCursor()
+{
+    if (gDigiLiveIRHardwarePacketCursor > gDigiLiveIRSoftwarePacketCursor) {
+        uint64_t backlog = gDigiLiveIRHardwarePacketCursor - gDigiLiveIRSoftwarePacketCursor;
+        gDigiLiveIRBacklogPackets = backlog > 0xffffffffull
+            ? 0xffffffffu
+            : static_cast<uint32_t>(backlog);
+    } else {
+        gDigiLiveIRBacklogPackets = 0;
+    }
+}
+
+bool
+CatchUpDigiLiveIRReadIndexToReadySegment(volatile OHCIAsyncDescriptor * irDescriptor,
+                                         uint64_t bufferAddress)
+{
+    if (kDigiLiveIRSegmentCatchUpEnabled == 0 ||
+        kDigiLiveIRSegmentCatchUpPacketCount == 0 ||
+        kDigiLiveIRCommandPtrCatchUpScanEnabled == 0 ||
+        irDescriptor == nullptr ||
+        bufferAddress == 0 ||
+        gDigiLiveIRBacklogPackets < kDigiLiveIRSegmentCatchUpPacketCount) {
+        return false;
+    }
+
+    gDigiLiveIRSegmentCatchUpAttemptCount++;
+    uint32_t fromIndex = gDigiLiveIRReadIndex;
+    uint32_t scanLimit = gDigiLiveIRBacklogPackets;
+    if (scanLimit > kDigiLiveIRCommandPtrCatchUpScanMaxPackets) {
+        scanLimit = kDigiLiveIRCommandPtrCatchUpScanMaxPackets;
+    }
+    if (scanLimit < kDigiLiveIRSegmentCatchUpPacketCount) {
+        gDigiLiveIRSegmentCatchUpFailureCount++;
+        return false;
+    }
+
+    uint32_t scannedSegments = 0;
+    uint32_t maxDistance = scanLimit - kDigiLiveIRSegmentCatchUpPacketCount + 1;
+    gDigiLiveIREmptyCatchUpScanCount++;
+    for (uint32_t distance = 1; distance <= maxDistance; ++distance) {
+        uint64_t candidateCursor = gDigiLiveIRSoftwarePacketCursor + distance;
+        scannedSegments++;
+        if (!DigiLiveReceiveSegmentAtCursorIsReady(irDescriptor,
+                                                   bufferAddress,
+                                                   candidateCursor,
+                                                   kDigiLiveIRSegmentCatchUpPacketCount)) {
+            continue;
+        }
+
+        uint32_t candidateIndex =
+            static_cast<uint32_t>(candidateCursor % kDigi00xDuplexIRDescriptorCount);
+        gDigiLiveIRSoftwarePacketCursor = candidateCursor;
+        gDigiLiveIRReadIndex = candidateIndex;
+        UpdateDigiLiveIRBacklogAfterSoftwareCursor();
+
+        gDigiLiveIREmptyCatchUpCount++;
+        gDigiLiveIREmptyCatchUpSkippedPackets += distance;
+        gDigiLiveIREmptyCatchUpScanFoundCount++;
+        gDigiLiveIREmptyCatchUpScanPackets += scannedSegments;
+        gDigiLiveIREmptyCatchUpLastFromIndex = fromIndex;
+        gDigiLiveIREmptyCatchUpLastToIndex = candidateIndex;
+        gDigiLiveIREmptyCatchUpLastHardwareIndex = gDigiLiveIRCommandPtrPacketIndex;
+        gDigiLiveIREmptyCatchUpLastSkippedPackets = distance;
+        gDigiLiveIREmptyCatchUpLastScannedPackets = scannedSegments;
+
+        gDigiLiveIRSegmentCatchUpSuccessCount++;
+        gDigiLiveIRSegmentCatchUpScannedSegments += scannedSegments;
+        gDigiLiveIRSegmentCatchUpLastFromIndex = fromIndex;
+        gDigiLiveIRSegmentCatchUpLastToIndex = candidateIndex;
+        gDigiLiveIRSegmentCatchUpLastHardwareIndex = gDigiLiveIRCommandPtrPacketIndex;
+        gDigiLiveIRSegmentCatchUpLastSkippedPackets = distance;
+        gDigiLiveIRSegmentCatchUpLastScannedSegments = scannedSegments;
+        return true;
+    }
+
+    gDigiLiveIRSegmentCatchUpFailureCount++;
+    gDigiLiveIRSegmentCatchUpScannedSegments += scannedSegments;
+    gDigiLiveIRSegmentCatchUpLastFromIndex = fromIndex;
+    gDigiLiveIRSegmentCatchUpLastToIndex = 0xffffffff;
+    gDigiLiveIRSegmentCatchUpLastHardwareIndex = gDigiLiveIRCommandPtrPacketIndex;
+    gDigiLiveIRSegmentCatchUpLastSkippedPackets = 0;
+    gDigiLiveIRSegmentCatchUpLastScannedSegments = scannedSegments;
+    return false;
+}
+
+bool
 CatchUpDigiLiveIRReadIndexAfterEmptyDescriptor(volatile OHCIAsyncDescriptor * irDescriptor,
                                                uint64_t bufferAddress)
 {
     if (kDigiLiveIRCommandPtrCatchUpEnabled == 0 ||
         gDigiLiveIRHardwareCursorValid == 0 ||
         gDigiLiveIRBacklogPackets < kDigiLiveIRCommandPtrCatchUpMinPackets) {
+        return false;
+    }
+
+    if (CatchUpDigiLiveIRReadIndexToReadySegment(irDescriptor, bufferAddress)) {
+        return true;
+    }
+    if (kDigiLiveIRSegmentCatchUpEnabled != 0 &&
+        kDigiLiveIRSegmentCatchUpFallbackToSinglePacket == 0) {
         return false;
     }
 
@@ -4775,15 +5016,7 @@ CatchUpDigiLiveIRReadIndexAfterEmptyDescriptor(volatile OHCIAsyncDescriptor * ir
                     gDigiLiveIRSoftwarePacketCursor = candidateCursor;
                     gDigiLiveIRReadIndex = candidateIndex;
                     skipped = distance;
-                    if (gDigiLiveIRHardwarePacketCursor > gDigiLiveIRSoftwarePacketCursor) {
-                        uint64_t backlog =
-                            gDigiLiveIRHardwarePacketCursor - gDigiLiveIRSoftwarePacketCursor;
-                        gDigiLiveIRBacklogPackets = backlog > 0xffffffffull
-                            ? 0xffffffffu
-                            : static_cast<uint32_t>(backlog);
-                    } else {
-                        gDigiLiveIRBacklogPackets = 0;
-                    }
+                    UpdateDigiLiveIRBacklogAfterSoftwareCursor();
                     gDigiLiveIREmptyCatchUpCount++;
                     gDigiLiveIREmptyCatchUpSkippedPackets += skipped;
                     gDigiLiveIREmptyCatchUpScanFoundCount++;
@@ -4805,7 +5038,7 @@ CatchUpDigiLiveIRReadIndexAfterEmptyDescriptor(volatile OHCIAsyncDescriptor * ir
                               kDigi00xDuplexIRDescriptorCount);
     gDigiLiveIRSoftwarePacketCursor = gDigiLiveIRHardwarePacketCursor;
     gDigiLiveIRReadIndex = toIndex;
-    gDigiLiveIRBacklogPackets = 0;
+    UpdateDigiLiveIRBacklogAfterSoftwareCursor();
     gDigiLiveIREmptyCatchUpCount++;
     gDigiLiveIREmptyCatchUpSkippedPackets += skipped;
     gDigiLiveIREmptyCatchUpLastFromIndex = fromIndex;
@@ -6643,13 +6876,20 @@ HarvestDigiLiveIsoStream()
 
     gDigiLiveDrainAttemptCount++;
     gDigiLiveHarvestAttemptCount++;
-    kern_return_t syncRet = SyncDMABufferForCPU(&gDigiLiveBuffer, kDigiLiveReceiveSyncSize);
+    kern_return_t syncRet = kDigiLiveReceiveFullBufferSyncEnabled != 0
+        ? SyncDMABufferForCPU(&gDigiLiveBuffer, kDigiLiveReceiveSyncSize)
+        : SyncDMABufferForCPURange(&gDigiLiveBuffer, 0, descriptorSyncSize);
     gDigiLiveSyncForCPURet = ReturnCodeToProperty(syncRet);
+    gDigiLiveRxDescriptorSyncForCPURet = ReturnCodeToProperty(syncRet);
     if (syncRet != kIOReturnSuccess) {
         gDigiLiveLastHarvestRet = ReturnCodeToProperty(syncRet);
         __sync_lock_release(&gDigiLiveDrainBusy);
         return static_cast<kern_return_t>(gDigiLiveSyncForCPURet);
     }
+    gDigiLiveRxDescriptorSyncCount++;
+    gDigiLiveRxDescriptorSyncBytes += kDigiLiveReceiveFullBufferSyncEnabled != 0
+        ? kDigiLiveReceiveSyncSize
+        : descriptorSyncSize;
 
     volatile OHCIAsyncDescriptor * irDescriptor =
         reinterpret_cast<volatile OHCIAsyncDescriptor *>(gDigiLiveBuffer.cpuRange.address +
@@ -6678,6 +6918,7 @@ HarvestDigiLiveIsoStream()
     uint32_t byteCount = 0;
     uint32_t peakAbs = 0;
     uint32_t labelMismatchCount = 0;
+    kern_return_t harvestErrorRet = kIOReturnSuccess;
     gAudioRingLastAppendDroppedFrames = 0;
 
     for (uint32_t pass = 0; pass < kDigiLiveHarvestMaxDescriptorsPerPass; ++pass) {
@@ -6726,6 +6967,21 @@ HarvestDigiLiveIsoStream()
         RecordDigiLiveSequenceReplayPacket(gDigiLiveRxEventCount, continuousForReplay);
 
         if (dataBlocks != 0) {
+            if (kDigiLiveReceiveFullBufferSyncEnabled == 0 &&
+                kDigiLiveReceivePayloadRangeSyncEnabled != 0) {
+                uint64_t payloadOffset =
+                    kDigi00xDuplexIRDataOffset +
+                    static_cast<uint64_t>(index) * kDigiLiveIRDescriptorDataStride;
+                kern_return_t payloadSyncRet =
+                    SyncDMABufferForCPURange(&gDigiLiveBuffer, payloadOffset, payloadBytes);
+                gDigiLiveRxPayloadSyncForCPURet = ReturnCodeToProperty(payloadSyncRet);
+                if (payloadSyncRet != kIOReturnSuccess) {
+                    harvestErrorRet = payloadSyncRet;
+                    break;
+                }
+                gDigiLiveRxPayloadSyncCount++;
+                gDigiLiveRxPayloadSyncBytes += payloadBytes;
+            }
             volatile uint32_t * packetPayload = packet.payload;
             for (uint32_t block = 0; block < dataBlocks; ++block) {
                 volatile uint32_t * dataBlock =
@@ -6777,7 +7033,9 @@ HarvestDigiLiveIsoStream()
         }
     }
 
-    if (packetCount != 0 || frameCount != 0) {
+    if (harvestErrorRet != kIOReturnSuccess) {
+        gDigiLiveLastHarvestRet = ReturnCodeToProperty(harvestErrorRet);
+    } else if (packetCount != 0 || frameCount != 0) {
         gAudioCaptureFrameCount = frameCount;
         gAudioCapturePeakAbs = peakAbs;
         gAudioCaptureGeneration++;
