@@ -1413,6 +1413,26 @@ PublishAudioRuntimeDiagnostics()
     AddNumberProperty(properties, "ProbeDigiLiveITLastPayloadResCount", gDigiLiveITLastPayloadResCount, 32);
     AddNumberProperty(properties, "ProbeDigiLiveITLastPayloadStatus", gDigiLiveITLastPayloadStatus, 32);
     AddNumberProperty(properties, "ProbeDigiLiveReceiveIRQInterval", kDigiLiveReceiveIRQInterval, 32);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveHarvestMaxDescriptorsPerPass",
+                      kDigiLiveHarvestMaxDescriptorsPerPass,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveHarvestSleepMilliseconds",
+                      kDigiLiveHarvestSleepMilliseconds,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveIdleSleepMilliseconds",
+                      kDigiLiveIdleSleepMilliseconds,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveWorkerLowWaterFrames",
+                      kDigiLiveWorkerLowWaterFrames,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeDigiLivePrebufferTargetFrames",
+                      kDigiLivePrebufferTargetFrames,
+                      32);
     AddNumberProperty(properties, "ProbeDigiLiveITEventPollCount", gDigiLiveITEventPollCount, 64);
     AddNumberProperty(properties, "ProbeDigiLiveITEventHitCount", gDigiLiveITEventHitCount, 64);
     AddNumberProperty(properties, "ProbeDigiLiveITEventMissCount", gDigiLiveITEventMissCount, 64);
@@ -6649,8 +6669,7 @@ StartAudioRefreshWorker()
                     sleepMilliseconds = 0;
                     gAudioRefreshWorkerBacklogNoSleepCount++;
                 }
-                if (ret == kIOReturnSuccess &&
-                    kDigiLiveWorkerLowWaterFrames != 0 &&
+                if (kDigiLiveWorkerLowWaterFrames != 0 &&
                     gAudioRingCurrentFillFrames < kDigiLiveWorkerLowWaterFrames) {
                     sleepMilliseconds = 0;
                     gAudioRefreshWorkerLowWaterNoSleepCount++;
