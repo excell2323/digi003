@@ -8,7 +8,7 @@ Current active local version:
 
 - Driver: `com.axelheckert.driver.FireWireOHCIProbe`
 - Host app: `com.axelheckert.FireWireOHCIProbeLoader`
-- Version: `0.2.114/314`
+- Version: `0.2.133/333`
 - Team ID used locally: `7H3ND356AV`
 - Controller: `pci11c1,5901` / IEEE 1394 Open HCI
 
@@ -1160,6 +1160,94 @@ often invalid or total 439 instead of 441 data blocks. The next replay step shou
 derive a phase-aligned 80-packet sequence from the validated RX cadence diagnostics
 instead of blindly consuming every raw moving queue window.
 
+### 0.2.131-0.2.133 phase-aligned moving replay dry-run
+
+`0.2.131` changed the moving replay dry-run to use a phase-aligned synthetic
+5/6 data-block sequence instead of replaying the raw moving queue counts. That
+first variant required the global RX cadence detector to be ready, so it stayed
+safe but did not exercise the replay path:
+
+```text
+Captures/coreaudio-digi003-test-0.2.131-cadencephase-dryrun-10s.wav
+after_1s_repeated_frames=0
+after_2s_repeated_frames=0
+last_5s_repeated_frames=0
+ProbeAudioRuntimeRingUnderrunFrames=0
+ProbeDigiLiveSequenceReplayMovingDryRunSuccessCount=0
+ProbeDigiLiveSequenceReplayMovingCadenceNotReadyCount=3931
+ProbeDigiLiveRxCadenceReady=0
+```
+
+`0.2.132` added queue-local phase learning from 80-packet windows whose raw
+total is 441 data blocks. Keeping a zero-mismatch requirement was still too
+strict for live harvest windows; it rejected 1330 learnable windows and again did
+not exercise the dry-run rewrite path.
+
+```text
+Captures/coreaudio-digi003-test-0.2.132-queuephase-dryrun-10s.wav
+after_1s_repeated_frames=0
+after_2s_repeated_frames=0
+last_5s_repeated_frames=0
+ProbeDigiLiveSequenceReplayMovingDryRunSuccessCount=0
+ProbeDigiLiveSequenceReplayMovingCadenceLearnRejectCount=1330
+ProbeDigiLiveSequenceReplayMovingLastRawTotalDataBlocks=442
+```
+
+`0.2.133` keeps the phase-aligned synthetic dry-run but allows the queue learner
+to pick the best phase even when the raw 80-packet window is not a perfect
+ideal-pattern match. This finally exercises the intended moving replay path while
+still not rewriting TX descriptors, syncing TX DMA, or waking the IT context.
+
+```text
+Captures/coreaudio-digi003-test-0.2.133-queuephase-loose-dryrun-10s.wav
+after_1s_repeated_frames=0
+after_2s_repeated_frames=0
+last_5s_repeated_frames=0
+ProbeAudioRuntimeRingUnderrunFrames=0
+ProbeDigiLiveSequenceReplayMovingDryRunSuccessCount=700
+ProbeDigiLiveSequenceReplayMovingDryRunPacketCount=56000
+ProbeDigiLiveSequenceReplayMovingCadencePhaseUseCount=700
+ProbeDigiLiveSequenceReplayMovingCadenceLearnCount=24
+ProbeDigiLiveSequenceReplayMovingCadenceLearnPacketCount=1920
+ProbeDigiLiveSequenceReplayMovingCadenceCachedUseCount=53
+ProbeDigiLiveSequenceReplayMovingBadTotalCount=0
+ProbeDigiLiveSequenceReplayMovingBadCommandPtrCount=0
+ProbeDigiLiveSequenceReplayMovingLastRawTotalDataBlocks=438
+ProbeDigiLiveSequenceReplayMovingLastTotalDataBlocks=441
+ProbeDigiLiveSequenceReplayMovingLastCadencePhase=37
+ProbeDigiLiveSequenceReplayMovingLastCadenceSource=1
+ProbeDigiLiveRxCadenceReady=1
+ProbeDigiLiveRxCadenceBestPhase=37
+ProbeDigiLiveRxCadenceBestPhaseMismatchCount=0
+```
+
+A 30-second follow-up confirms that the replay dry-run continues to run, but the
+known long-run input harvest/ring starvation still returns:
+
+```text
+Captures/coreaudio-digi003-test-0.2.133-queuephase-loose-dryrun-30s.wav
+repeated_frames=85631
+after_1s_repeated_frames=80000
+last_10s_repeated_frames=41088
+last_5s_repeated_frames=25280
+ProbeAudioRuntimeRingUnderrunFrames=78202
+ProbeDigiLiveSequenceReplayMovingDryRunSuccessCount=1726
+ProbeDigiLiveSequenceReplayMovingDryRunPacketCount=138080
+ProbeDigiLiveSequenceReplayMovingCadencePhaseUseCount=1726
+ProbeDigiLiveSequenceReplayMovingCadenceLearnCount=425
+ProbeDigiLiveSequenceReplayMovingCadenceCachedUseCount=854
+ProbeDigiLiveSequenceReplayMovingBadTotalCount=0
+ProbeDigiLiveSequenceReplayMovingBadCommandPtrCount=0
+```
+
+Interpretation:
+
+The moving replay command-pointer path and phase-aligned data-block generation
+are no longer the immediate blocker in dry-run. The next risk to solve before
+enabling live descriptor rewrites is the long-run input harvest starvation:
+around 20-30 seconds the Core Audio ring can drain to near-empty even while the
+replay dry-run is otherwise progressing.
+
 ## Local Automation Notes
 
 A narrow local sudoers rule is installed at `/etc/sudoers.d/firewire-ohci-probe` so Codex can continue DriverKit upgrade loops without repeated password prompts. It permits only:
@@ -1170,6 +1258,11 @@ A narrow local sudoers rule is installed at `/etc/sudoers.d/firewire-ohci-probe`
 ```
 
 The helper validates that the PID belongs to `com.axelheckert.driver.FireWireOHCIProbe` before sending `kill -9`. The previous malformed `/etc/sudoers` line was removed, with a backup saved as `/etc/sudoers.codex-backup-20260517130552`.
+
+The development provisioning profiles must be signed with the matching
+`Apple Development: axelheckert@icloud.com (L2YWACT7FH)` identity. Signing the
+same profile with `Developer ID Application: Axel Heckert (7H3ND356AV)` launches
+as an AMFI failure with `No matching profile found`.
 
 New diagnostics:
 
