@@ -4902,6 +4902,15 @@ DigiLiveTransmitDataBlocksForPacket(uint32_t packetIndex,
 }
 
 void
+WriteDigiLiveSilentTransmitDataBlock(volatile uint32_t * payload)
+{
+    payload[0] = ToBigEndian32(0x80000000u);
+    for (uint32_t channel = 0; channel < kDigi00xDuplexPCMAudioChannels; ++channel) {
+        payload[1 + channel] = ToBigEndian32(0x40000000u);
+    }
+}
+
+void
 UpdateDigiLiveTransmitPacketDescriptor(volatile OHCIAsyncDescriptor * itDescriptor,
                                        volatile uint32_t * itHeaderStorage,
                                        uint32_t packetIndex,
@@ -6734,11 +6743,8 @@ ConfigureDigiLiveTransmitDescriptors(volatile OHCIAsyncDescriptor * itDescriptor
 
         volatile uint32_t * payload =
             itPayloadStorage + ((packet * kDigiLiveITPayloadStrideBytes) / sizeof(uint32_t));
-        for (uint32_t block = 0; block < dataBlocks; ++block) {
-            payload[0] = ToBigEndian32(0x80000000u);
-            for (uint32_t channel = 0; channel < kDigi00xDuplexPCMAudioChannels; ++channel) {
-                payload[1 + channel] = ToBigEndian32(0x40000000u);
-            }
+        for (uint32_t block = 0; block < kDigiLiveITMaxDataBlocksPerPacket; ++block) {
+            WriteDigiLiveSilentTransmitDataBlock(payload);
             payload += kDigi00xDuplexDataBlockQuadlets;
         }
 

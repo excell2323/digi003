@@ -1106,6 +1106,25 @@ ProbeOHCIInterruptDispatchEnabled=0
 ProbeDigiLiveIREventLowWaterBypassEnabled=0
 ```
 
+### 0.2.129 TX max-payload initialization
+
+Prepared the transmit ring for safer Linux-style on-the-fly sequence replay by
+initializing all six reserved AM824 payload data blocks for every IT packet. The
+active packet descriptor still advertises only the selected 5/6 data-block length,
+but a later 5-to-6 replay update can no longer expose an uninitialized sixth block.
+
+This does not enable sequence replay yet; it is a prerequisite for the next dry-run
+or moving-replay experiment.
+
+```text
+Captures/coreaudio-digi003-test-0.2.129-tx-max-payload-init-10s.wav
+after_1s_repeated_frames=0
+after_2s_repeated_frames=0
+last_5s_repeated_frames=0
+ProbeAudioRuntimeRingUnderrunFrames=0
+ProbeDigiLiveSequenceReplayMovingEnabled=0
+```
+
 ## Local Automation Notes
 
 A narrow local sudoers rule is installed at `/etc/sudoers.d/firewire-ohci-probe` so Codex can continue DriverKit upgrade loops without repeated password prompts. It permits only:
