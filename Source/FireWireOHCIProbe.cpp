@@ -10,6 +10,7 @@
 #include <DriverKit/IOInterruptDispatchSource.h>
 #include <DriverKit/IODMACommand.h>
 #include <DriverKit/IOLib.h>
+#include <DriverKit/IOMemoryMap.h>
 #include <DriverKit/IOUserServer.h>
 #include <DriverKit/OSAction.h>
 #include <DriverKit/OSData.h>
@@ -361,6 +362,7 @@ struct DMABuffer
 {
     IOBufferMemoryDescriptor * memory;
     IODMACommand * command;
+    IOMemoryMap * cpuMap;
     IOAddressSegment cpuRange;
     IOAddressSegment dmaSegment;
     uint32_t segmentCount;
@@ -369,6 +371,7 @@ struct DMABuffer
     kern_return_t createRet;
     kern_return_t setLengthRet;
     kern_return_t rangeRet;
+    kern_return_t mappingRet;
     kern_return_t dmaCreateRet;
     kern_return_t prepareRet;
     kern_return_t completeRet;
@@ -376,6 +379,7 @@ struct DMABuffer
     kern_return_t syncForCPURet;
     uint32_t completed;
     uint32_t maxAddressBits;
+    uint32_t cacheInhibitMapping;
     uint32_t lowAddressAttempted;
     kern_return_t lowAddressResult;
     uint32_t lowAddressSegmentCount;
@@ -2046,6 +2050,9 @@ PublishAudioRuntimeDiagnostics()
     AddNumberProperty(properties, "ProbeDigiLiveSlot0LastLabel", gDigiLiveSlot0LastLabel, 32);
     AddNumberProperty(properties, "ProbeDigiLiveSlot0LastValue24", gDigiLiveSlot0LastValue24, 32);
     AddNumberProperty(properties, "ProbeDigiLiveSlot0NonzeroCount", gDigiLiveSlot0NonzeroCount, 64);
+    AddNumberProperty(properties, "ProbeDigiLiveDMACacheInhibitMapping", gDigiLiveBuffer.cacheInhibitMapping, 32);
+    AddNumberProperty(properties, "ProbeDigiLiveDMAMappingRet", ReturnCodeToProperty(gDigiLiveBuffer.mappingRet), 32);
+    AddNumberProperty(properties, "ProbeDigiLiveDMACPULength", gDigiLiveBuffer.cpuRange.length, 64);
     AddNumberProperty(properties, "ProbeDigiLiveSyncForDeviceRet", gDigiLiveSyncForDeviceRet, 32);
     AddNumberProperty(properties, "ProbeDigiLiveSyncForCPURet", gDigiLiveSyncForCPURet, 32);
     AddNumberProperty(properties, "ProbeDigiLiveCompleteRet", gDigiLiveCompleteRet, 32);
@@ -3574,6 +3581,10 @@ ReadPhyPortStatus(IOPCIDevice * pciDevice,
 void
 ReleaseDMABuffer(DMABuffer * buffer)
 {
+    if (buffer->cpuMap != nullptr) {
+        buffer->cpuMap->release();
+        buffer->cpuMap = nullptr;
+    }
     if (buffer->command != nullptr) {
         if (buffer->completed == 0) {
             buffer->completeRet = buffer->command->CompleteDMA(kIODMACommandCompleteDMANoOptions);
@@ -3608,6 +3619,11 @@ SyncDMABufferForDevice(DMABuffer * buffer, uint64_t size)
     if (buffer->command == nullptr || buffer->memory == nullptr || buffer->completed != 0) {
         return kIOReturnNotReady;
     }
+    if (buffer->cacheInhibitMapping != 0) {
+        __sync_synchronize();
+        buffer->syncForDeviceRet = kIOReturnSuccess;
+        return buffer->syncForDeviceRet;
+    }
 
     buffer->syncForDeviceRet = buffer->command->PerformOperation(kIODMACommandPerformOperationOptionWrite,
                                                                  0,
@@ -3626,6 +3642,11 @@ SyncDMABufferForDeviceRange(DMABuffer * buffer, uint64_t offset, uint64_t size)
     if (offset > buffer->cpuRange.length || size > buffer->cpuRange.length - offset) {
         return kIOReturnBadArgument;
     }
+    if (buffer->cacheInhibitMapping != 0) {
+        __sync_synchronize();
+        buffer->syncForDeviceRet = kIOReturnSuccess;
+        return buffer->syncForDeviceRet;
+    }
 
     buffer->syncForDeviceRet = buffer->command->PerformOperation(kIODMACommandPerformOperationOptionWrite,
                                                                  offset,
@@ -3640,6 +3661,11 @@ SyncDMABufferForCPU(DMABuffer * buffer, uint64_t size)
 {
     if (buffer->command == nullptr || buffer->memory == nullptr || buffer->completed != 0) {
         return kIOReturnNotReady;
+    }
+    if (buffer->cacheInhibitMapping != 0) {
+        __sync_synchronize();
+        buffer->syncForCPURet = kIOReturnSuccess;
+        return buffer->syncForCPURet;
     }
 
     buffer->syncForCPURet = buffer->command->PerformOperation(kIODMACommandPerformOperationOptionRead,
@@ -3658,6 +3684,11 @@ SyncDMABufferForCPURange(DMABuffer * buffer, uint64_t offset, uint64_t size)
     }
     if (offset > buffer->cpuRange.length || size > buffer->cpuRange.length - offset) {
         return kIOReturnBadArgument;
+    }
+    if (buffer->cacheInhibitMapping != 0) {
+        __sync_synchronize();
+        buffer->syncForCPURet = kIOReturnSuccess;
+        return buffer->syncForCPURet;
     }
 
     buffer->syncForCPURet = buffer->command->PerformOperation(kIODMACommandPerformOperationOptionRead,
@@ -3685,10 +3716,12 @@ kern_return_t
 CreateDMABufferWithMaxAddressBits(IOPCIDevice * pciDevice,
                                   uint64_t size,
                                   uint32_t maxAddressBits,
+                                  bool cacheInhibitMapping,
                                   DMABuffer * buffer)
 {
     ReleaseDMABuffer(buffer);
     buffer->maxAddressBits = maxAddressBits;
+    buffer->cacheInhibitMapping = cacheInhibitMapping ? 1 : 0;
 
     buffer->createRet = IOBufferMemoryDescriptor::Create(kIOMemoryDirectionInOut, size, 4096, &buffer->memory);
     if (buffer->createRet != kIOReturnSuccess) {
@@ -3702,10 +3735,34 @@ CreateDMABufferWithMaxAddressBits(IOPCIDevice * pciDevice,
         return buffer->setLengthRet;
     }
 
-    buffer->rangeRet = buffer->memory->GetAddressRange(&buffer->cpuRange);
-    if (buffer->rangeRet != kIOReturnSuccess) {
-        buffer->result = buffer->rangeRet;
-        return buffer->rangeRet;
+    if (cacheInhibitMapping) {
+        buffer->mappingRet = buffer->memory->CreateMapping(kIOMemoryMapCacheModeInhibit,
+                                                           0,
+                                                           0,
+                                                           size,
+                                                           0,
+                                                           &buffer->cpuMap);
+        if (buffer->mappingRet != kIOReturnSuccess || buffer->cpuMap == nullptr) {
+            buffer->rangeRet = buffer->mappingRet;
+            buffer->result =
+                buffer->mappingRet == kIOReturnSuccess ? kIOReturnNoMemory : buffer->mappingRet;
+            return buffer->result;
+        }
+        buffer->cpuRange.address = buffer->cpuMap->GetAddress();
+        buffer->cpuRange.length = buffer->cpuMap->GetLength();
+        if (buffer->cpuRange.address == 0 || buffer->cpuRange.length < size) {
+            buffer->rangeRet = kIOReturnNoMemory;
+            buffer->result = buffer->rangeRet;
+            return buffer->rangeRet;
+        }
+        buffer->rangeRet = kIOReturnSuccess;
+    } else {
+        buffer->mappingRet = kIOReturnNotReady;
+        buffer->rangeRet = buffer->memory->GetAddressRange(&buffer->cpuRange);
+        if (buffer->rangeRet != kIOReturnSuccess) {
+            buffer->result = buffer->rangeRet;
+            return buffer->rangeRet;
+        }
     }
 
     ZeroCPUBuffer(buffer, size);
@@ -3752,7 +3809,7 @@ CreateDMABufferWithMaxAddressBits(IOPCIDevice * pciDevice,
 kern_return_t
 CreateDMABuffer(IOPCIDevice * pciDevice, uint64_t size, DMABuffer * buffer)
 {
-    kern_return_t lowRet = CreateDMABufferWithMaxAddressBits(pciDevice, size, 31, buffer);
+    kern_return_t lowRet = CreateDMABufferWithMaxAddressBits(pciDevice, size, 31, false, buffer);
     uint32_t lowSegmentCount = buffer->segmentCount;
     uint64_t lowDMAAddress = buffer->dmaSegment.address;
     uint64_t lowDMALength = buffer->dmaSegment.length;
@@ -3765,7 +3822,32 @@ CreateDMABuffer(IOPCIDevice * pciDevice, uint64_t size, DMABuffer * buffer)
         return lowRet;
     }
 
-    kern_return_t ret = CreateDMABufferWithMaxAddressBits(pciDevice, size, 32, buffer);
+    kern_return_t ret = CreateDMABufferWithMaxAddressBits(pciDevice, size, 32, false, buffer);
+    buffer->lowAddressAttempted = 1;
+    buffer->lowAddressResult = lowRet;
+    buffer->lowAddressSegmentCount = lowSegmentCount;
+    buffer->lowAddressDMAAddress = lowDMAAddress;
+    buffer->lowAddressDMALength = lowDMALength;
+    return ret;
+}
+
+kern_return_t
+CreateUncachedDMABuffer(IOPCIDevice * pciDevice, uint64_t size, DMABuffer * buffer)
+{
+    kern_return_t lowRet = CreateDMABufferWithMaxAddressBits(pciDevice, size, 31, true, buffer);
+    uint32_t lowSegmentCount = buffer->segmentCount;
+    uint64_t lowDMAAddress = buffer->dmaSegment.address;
+    uint64_t lowDMALength = buffer->dmaSegment.length;
+    if (lowRet == kIOReturnSuccess && lowDMAAddress <= 0x7fffffffull) {
+        buffer->lowAddressAttempted = 1;
+        buffer->lowAddressResult = lowRet;
+        buffer->lowAddressSegmentCount = lowSegmentCount;
+        buffer->lowAddressDMAAddress = lowDMAAddress;
+        buffer->lowAddressDMALength = lowDMALength;
+        return lowRet;
+    }
+
+    kern_return_t ret = CreateDMABufferWithMaxAddressBits(pciDevice, size, 32, true, buffer);
     buffer->lowAddressAttempted = 1;
     buffer->lowAddressResult = lowRet;
     buffer->lowAddressSegmentCount = lowSegmentCount;
@@ -7187,7 +7269,7 @@ StartDigiLiveIsoStream()
         return kIOReturnNotReady;
     }
 
-    CreateDMABuffer(gPCIDevice, kDigi00xDuplexBufferSize, &gDigiLiveBuffer);
+    CreateUncachedDMABuffer(gPCIDevice, kDigi00xDuplexBufferSize, &gDigiLiveBuffer);
     if (gDigiLiveBuffer.result != kIOReturnSuccess ||
         gDigiLiveBuffer.segmentCount == 0 ||
         gDigiLiveBuffer.cpuRange.address == 0 ||

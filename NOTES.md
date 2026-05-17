@@ -8,7 +8,7 @@ Current active local version:
 
 - Driver: `com.axelheckert.driver.FireWireOHCIProbe`
 - Host app: `com.axelheckert.FireWireOHCIProbeLoader`
-- Version: `0.2.138/338`
+- Version: `0.2.139/339`
 - Team ID used locally: `7H3ND356AV`
 - Controller: `pci11c1,5901` / IEEE 1394 Open HCI
 
@@ -1390,6 +1390,56 @@ ProbeDigiLiveSequenceReplayMovingLastStartDistancePackets=4096
 ProbeDigiLiveSequenceReplayMovingLastEndDistancePackets=4175
 ProbeDigiLiveSequenceReplayMovingBadCommandPtrCount=0
 ```
+
+`0.2.139` changes only the live Digi DMA buffer mapping. Following the
+ASFireWire DMA-memory lesson, the large live isoch buffer now uses a
+cache-inhibited CPU mapping and treats DMA sync calls as ordering barriers for
+that buffer. This removes the expensive hot-path `IODMACommand::PerformOperation`
+sync work while leaving the older async/probe buffers unchanged.
+
+10-second smoke test:
+
+```text
+Captures/coreaudio-digi003-test-0.2.139-uncached-dma-10s.wav
+after_1s_repeated_frames=0
+after_2s_repeated_frames=0
+last_5s_repeated_frames=0
+ProbeDigiLiveDMACacheInhibitMapping=1
+ProbeDigiLiveDMAMappingRet=0
+ProbeAudioRuntimeRingUnderrunFrames=0
+ProbeAudioRuntimeRingRepeatedFrames=0
+ProbeDigiLiveIREmptyCatchUpCount=0
+ProbeDigiLiveDrainBusyCount=0
+```
+
+30-second follow-up:
+
+```text
+Captures/coreaudio-digi003-test-0.2.139-uncached-dma-30s.wav
+repeated_frames=1067
+after_1s_repeated_frames=0
+after_2s_repeated_frames=0
+last_10s_repeated_frames=0
+last_5s_repeated_frames=0
+ProbeAudioRuntimeRingUnderrunFrames=0
+ProbeAudioRuntimeRingRepeatedFrames=0
+ProbeAudioRuntimeRingOverrunFrames=6279
+ProbeDigiLiveRxDBCLostCount=3
+ProbeDigiLiveRxCycleLostCount=0
+ProbeDigiLiveIREmptyCatchUpCount=0
+ProbeDigiLiveEmptyPollCount=0
+ProbeDigiLiveRxCadenceReady=1
+ProbeDigiLiveSequenceReplayMovingBadCommandPtrCount=0
+```
+
+Interpretation:
+
+This is the first stable 30-second CoreAudio input result. The previous late
+starvation was dominated by DMA coherency/sync overhead rather than CPU
+throughput or FireWire packet cadence. The new issue is latency: with the old
+49152-frame prebuffer and 65536-frame ring, the producer now runs with too much
+headroom and hits ring overrun instead of underrun. The next experiment should
+lower the prebuffer/low-water targets while keeping the uncached DMA mapping.
 
 ## Local Automation Notes
 
