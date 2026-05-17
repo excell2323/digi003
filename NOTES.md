@@ -8,7 +8,7 @@ Current active local version:
 
 - Driver: `com.axelheckert.driver.FireWireOHCIProbe`
 - Host app: `com.axelheckert.FireWireOHCIProbeLoader`
-- Version: `0.2.140/340`
+- Version: `0.2.145/345`
 - Team ID used locally: `7H3ND356AV`
 - Controller: `pci11c1,5901` / IEEE 1394 Open HCI
 
@@ -1516,6 +1516,109 @@ dry-run stable. The remaining transport work is to turn the output path from
 dry-run into a safe staged/pre-start descriptor strategy, then add the Digi 003
 output encoding and later the control/mixer/fader surfaces.
 
+## 0.2.142 Output Payload Path
+
+`0.2.142` keeps the new output stream from `0.2.141`, but only pushes whole
+5/6-frame transmit packets into the IT payload ring. Any short tail from an
+AudioDriverKit output callback remains queued until the next callback instead
+of being padded with silent frames. This keeps the output path quieter during
+input-only tests and avoids unnecessary Digi encoder resets.
+
+Validation:
+
+```text
+Captures/coreaudio-digi003-test-0.2.142-outputpath2-10s.wav
+frames=441000
+repeated=871
+after_1s_repeated=0
+after_2s_repeated=0
+last_5s_repeated=0
+ProbeAudioRuntimeRingUnderrunFrames=0
+ProbeAudioRuntimeRingRepeatedFrames=0
+ProbeAudioRuntimeRingOverrunFrames=0
+ProbeDigiLiveRxDBCLostCount=1
+ProbeDigiLiveRxCycleLostCount=0
+ProbeDigiLiveOutputFrameWriteCount=442080
+ProbeDigiLiveOutputSilentFrameWriteCount=0
+ProbeDigiLiveOutputLastSyncRet=0
+```
+
+## 0.2.143 Output Prebuffer
+
+`0.2.143` adds a small CoreAudio output-ring prebuffer before writing host audio
+into the future FireWire transmit payload slots. Playback now waits for 1024
+queued output frames, then keeps 512 frames in reserve while feeding complete
+5/6-frame Digi packets. This is intended to smooth CoreAudio callback jitter
+without changing the Digi 003 AM824/double-oh-three encoder.
+
+The x42 `003amdtp` reference matches the encoder model: Digi 003 playback/output
+requires the middle-byte obfuscation, while capture/input is plain AM824.
+
+## 0.2.144 Continuous Output Payload Service
+
+`0.2.144` changes the output path to behave more like Linux `amdtp-dot`: the
+driver continuously refreshes future FireWire transmit payload slots with either
+CoreAudio PCM or explicit silence. This prevents old static payload slots from
+being replayed by the looping OHCI transmit ring after CoreAudio stops writing.
+
+The previous 512-frame output keep buffer is disabled so stale tail audio is
+drained instead of being preserved for the next playback attempt.
+
+## 0.2.145 Stop-Time Silence Scrub
+
+`0.2.145` adds an explicit stop-time scrub: when CoreAudio stops the device, the
+driver drops any remaining host-output tail and writes a short future window of
+silent Digi payloads before stopping the FireWire live stream. This targets the
+case where AudioDriverKit stops the worker while the OHCI transmit ring would
+otherwise still contain recent tone payloads.
+
+Loopback validation with output 1 patched to input 1:
+
+```text
+Captures/coreaudio-digi003-loopback-0.2.145-continuous-silence-12s.wav
+active_start=4.48s
+active_end=8.21s
+5ms_gap_count=0
+10ms_gap_count=0
+50ms_gap_count=0
+ProbeAudioRuntimeOutputRingUnderrunFrames=0
+ProbeAudioRuntimeOutputRingOverrunFrames=0
+ProbeAudioRuntimeRingUnderrunFrames=0
+ProbeAudioRuntimeRingRepeatedFrames=0
+ProbeDigiLiveRxCycleLostCount=0
+```
+
+`Tools/play-digi-output 2 440` produced 88200 CoreAudio output frames and the
+driver wrote 87499 frames to the live IT payload ring with no output underruns.
+Audible confirmation is still pending.
+
+## 0.2.141 Output Payload Path
+
+`0.2.141` adds the first non-silent output path without changing the live
+descriptor cadence strategy that made input stable in `0.2.140`.
+
+Changes:
+
+- Adds a CoreAudio output stream named `Digi 003 Outputs 1-8`.
+- Adds a host-to-driver output ring and copies `IOUserAudioIOOperationWriteEnd`
+  buffers into it.
+- Writes output frames into future IT payload slots only; descriptors and CIP
+  headers stay static while the stream is running.
+- Adds the Digi "double-oh-three" playback encoder from the Linux-referenced
+  algorithm, applied across all 18 AM824 PCM slots while the first 8 slots are
+  fed from CoreAudio and the remaining slots are encoded silence.
+- Starts with a conservative `ProbeDigiLiveOutputLeadPackets=1024` so the first
+  output test does not race the OHCI transmit cursor. This is intentionally
+  higher latency and should be reduced after stability is confirmed.
+
+New diagnostics:
+
+```text
+ProbeAudioRuntimeOutput*
+ProbeDigiLiveOutput*
+ProbeDigiLiveOutputDot*
+```
+
 ## Local Automation Notes
 
 A narrow local sudoers rule is installed at `/etc/sudoers.d/firewire-ohci-probe` so Codex can continue DriverKit upgrade loops without repeated password prompts. It permits only:
@@ -1585,5 +1688,5 @@ monitor source stride                = 8
 1. Keep `ProbeOHCIInterruptDispatchEnabled=0` until the harvest path is made cheaper.
 2. Reduce RX DBC/cycle lost counts and 30-second underruns without adding harvest callers.
 3. Investigate producer/consumer ring policy: long-run audio repeats match ring starvation even when the device stream remains active.
-4. Add Digi "double-oh-three" playback encoding before enabling non-silent output.
-5. Add MIDI/control-surface and mixer/control support after audio input stability improves.
+4. Test non-silent CoreAudio output with the payload-only path, then reduce output lead packets for latency.
+5. Add MIDI/control-surface and mixer/control support after audio input/output stability improves.

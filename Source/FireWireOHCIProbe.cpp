@@ -277,6 +277,12 @@ constexpr uint32_t kDigi00xDuplexAM824AudioLabel = 0x40;
 constexpr uint32_t kAudioDeviceZeroTimestampPeriod = 128;
 constexpr uint32_t kAudioInputBufferFrameCount = 8192;
 constexpr uint32_t kAudioRingBufferFrameCount = 65536;
+constexpr uint32_t kAudioOutputStreamEnabled = 1;
+constexpr uint32_t kAudioOutputBufferFrameCount = 8192;
+constexpr uint32_t kAudioOutputRingBufferFrameCount = 65536;
+constexpr uint32_t kAudioOutputChannelCount = 8;
+constexpr uint32_t kAudioOutputRingPrebufferFrames = 1024;
+constexpr uint32_t kAudioOutputRingKeepFrames = 0;
 constexpr uint32_t kAudioRefreshStopWaitLoopLimit = 1000;
 constexpr uint32_t kAudioDirectInputBufferEnabled = 0;
 constexpr uint32_t kAudioCallbackHarvestEnabled = 1;
@@ -308,6 +314,12 @@ constexpr uint32_t kDigiLiveSequenceReplayMovingQueuePackets = 512;
 constexpr uint32_t kDigiLiveSequenceReplayMovingUpdatePackets = 80;
 constexpr uint32_t kDigiLiveSequenceReplayMovingLeadPackets = 4096;
 constexpr uint32_t kDigiLiveSequenceReplayPeriodDataBlocks44100 = 441;
+constexpr uint32_t kDigiLiveOutputPayloadUpdateEnabled = 1;
+constexpr uint32_t kDigiLiveOutputLeadPackets = 1024;
+constexpr uint32_t kDigiLiveOutputServiceAheadPackets = 64;
+constexpr uint32_t kDigiLiveOutputSilenceAheadPackets = 1024;
+constexpr uint32_t kDigiLiveOutputMaxPacketsPerPush = 512;
+constexpr uint32_t kDigiLiveOutputStopSilencePushCount = 2;
 constexpr uint32_t kDigiLiveRxCadencePeriodPackets = 80;
 constexpr uint32_t kDigiLiveStateStopped = 0;
 constexpr uint32_t kDigiLiveStateStarting = 1;
@@ -318,6 +330,11 @@ constexpr uint32_t kAudioInputBytesPerFrame =
     kDigi00xDuplexIRCapturePCMChannelCount * kAudioInputBytesPerSample;
 constexpr uint64_t kAudioInputBufferBytes =
     static_cast<uint64_t>(kAudioInputBufferFrameCount) * kAudioInputBytesPerFrame;
+constexpr uint32_t kAudioOutputBytesPerSample = sizeof(int32_t);
+constexpr uint32_t kAudioOutputBytesPerFrame =
+    kAudioOutputChannelCount * kAudioOutputBytesPerSample;
+constexpr uint64_t kAudioOutputBufferBytes =
+    static_cast<uint64_t>(kAudioOutputBufferFrameCount) * kAudioOutputBytesPerFrame;
 constexpr uint32_t kDigi00xWritePlanEnabled = 0;
 constexpr uint32_t kDigi00xNoopWriteEnabled = 0;
 constexpr uint32_t kDigi00xStateWriteEnabled = 0;
@@ -940,6 +957,12 @@ struct DigiDuplexDiagnostics
     uint32_t completeRet;
 };
 
+struct DigiDotState {
+    uint8_t carry;
+    uint8_t idx;
+    uint32_t off;
+};
+
 DMABuffer gSelfIDBuffer = {};
 DMABuffer gConfigROMBuffer = {};
 DMABuffer gAsyncTxBuffer = {};
@@ -949,9 +972,12 @@ DMABuffer gIsoTestBuffer = {};
 DMABuffer gDigiDuplexBuffer = {};
 DMABuffer gDigiLiveBuffer = {};
 IOBufferMemoryDescriptor * gAudioInputBuffer = nullptr;
+IOBufferMemoryDescriptor * gAudioOutputBuffer = nullptr;
 IOAddressSegment gAudioInputCPUAddress = {};
+IOAddressSegment gAudioOutputCPUAddress = {};
 OSSharedPtr<IOUserAudioDevice> gAudioDevice;
 OSSharedPtr<IOUserAudioStream> gAudioInputStream;
+OSSharedPtr<IOUserAudioStream> gAudioOutputStream;
 FireWireOHCIProbe * gDriverInstance = nullptr;
 IOPCIDevice * gPCIDevice = nullptr;
 uint8_t gPCIMemoryIndex = 0xff;
@@ -986,9 +1012,12 @@ uint64_t gOHCIInterruptLastTime = 0;
 uint32_t gAudioDeviceCreateRet = static_cast<uint32_t>(kIOReturnNotReady);
 uint32_t gAudioStreamCreateRet = static_cast<uint32_t>(kIOReturnNotReady);
 uint32_t gAudioAddStreamRet = static_cast<uint32_t>(kIOReturnNotReady);
+uint32_t gAudioOutputStreamCreateRet = static_cast<uint32_t>(kIOReturnNotReady);
+uint32_t gAudioOutputAddStreamRet = static_cast<uint32_t>(kIOReturnNotReady);
 uint32_t gAudioAddObjectRet = static_cast<uint32_t>(kIOReturnNotReady);
 uint32_t gAudioIOHandlerRet = static_cast<uint32_t>(kIOReturnNotReady);
 uint32_t gAudioStreamActiveRet = static_cast<uint32_t>(kIOReturnNotReady);
+uint32_t gAudioOutputStreamActiveRet = static_cast<uint32_t>(kIOReturnNotReady);
 uint32_t gAudioRegisterIOThreadRet = static_cast<uint32_t>(kIOReturnNotReady);
 uint32_t gAudioStartIOThreadRet = static_cast<uint32_t>(kIOReturnNotReady);
 uint32_t gAudioStartDeviceCount = 0;
@@ -1004,6 +1033,9 @@ uint32_t gAudioDeviceStopIORet = static_cast<uint32_t>(kIOReturnNotReady);
 uint32_t gAudioBufferCreateRet = static_cast<uint32_t>(kIOReturnNotReady);
 uint32_t gAudioBufferSetLengthRet = static_cast<uint32_t>(kIOReturnNotReady);
 uint32_t gAudioBufferRangeRet = static_cast<uint32_t>(kIOReturnNotReady);
+uint32_t gAudioOutputBufferCreateRet = static_cast<uint32_t>(kIOReturnNotReady);
+uint32_t gAudioOutputBufferSetLengthRet = static_cast<uint32_t>(kIOReturnNotReady);
+uint32_t gAudioOutputBufferRangeRet = static_cast<uint32_t>(kIOReturnNotReady);
 uint32_t gAudioRefreshCaptureAttemptCount = 0;
 uint32_t gAudioRefreshCaptureSuccessCount = 0;
 uint32_t gAudioRefreshCaptureInProgress = 0;
@@ -1027,6 +1059,9 @@ uint32_t gAudioInputCallbackHarvestAttemptCount = 0;
 uint32_t gAudioInputCallbackHarvestSuccessCount = 0;
 uint32_t gAudioInputCallbackHarvestRet = static_cast<uint32_t>(kIOReturnNotReady);
 uint32_t gAudioInputCallbackHarvestLastFillFrames = 0;
+uint32_t gAudioOutputCallbackCount = 0;
+uint32_t gAudioOutputLastBufferFrameSize = 0;
+uint64_t gAudioOutputLastSampleTime = 0;
 uint32_t gAudioCaptureFrameCount = 0;
 uint32_t gAudioCapturePeakAbs = 0;
 uint32_t gAudioCaptureGeneration = 0;
@@ -1046,6 +1081,22 @@ uint32_t gAudioRingLastAppendGeneration = 0;
 uint32_t gAudioRingLastConsumeFrames = 0;
 uint32_t gAudioRingLastConsumeUnderrunFrames = 0;
 uint32_t gAudioRingLastConsumeRepeatedFrames = 0;
+uint64_t gAudioOutputRingWriteFrame = 0;
+uint64_t gAudioOutputRingReadFrame = 0;
+uint64_t gAudioOutputRingProducedFrames = 0;
+uint64_t gAudioOutputRingConsumedFrames = 0;
+uint64_t gAudioOutputRingUnderrunFrames = 0;
+uint64_t gAudioOutputRingOverrunFrames = 0;
+uint32_t gAudioOutputRingCurrentFillFrames = 0;
+uint32_t gAudioOutputRingMaxFillFrames = 0;
+uint32_t gAudioOutputRingAppendCount = 0;
+uint32_t gAudioOutputRingLastAppendFrames = 0;
+uint32_t gAudioOutputRingLastAppendDroppedFrames = 0;
+uint32_t gAudioOutputRingLastConsumeFrames = 0;
+uint32_t gAudioOutputRingLastConsumeUnderrunFrames = 0;
+uint32_t gAudioOutputRingPrebuffered = 0;
+uint64_t gAudioOutputRingPrebufferReadyCount = 0;
+uint64_t gAudioOutputRingPrebufferHoldCount = 0;
 uint32_t gDigiLiveStartAttemptCount = 0;
 uint32_t gDigiLiveStartSuccessCount = 0;
 uint32_t gDigiLiveStopAttemptCount = 0;
@@ -1236,6 +1287,33 @@ uint32_t gDigiLiveSequenceReplayLastDataBlocks = 0;
 uint8_t gDigiLiveSequenceReplayMovingQueue[kDigiLiveSequenceReplayMovingQueuePackets] = {};
 uint8_t gDigiLiveTxDataBlocks[kDigi00xDuplexITPacketCount] = {};
 uint32_t gDigiLiveSourceNodeIDField = 0;
+uint32_t gDigiLiveITHardwareCursorValid = 0;
+uint64_t gDigiLiveITHardwarePacketCursor = 0;
+uint32_t gDigiLiveOutputPacketCursorValid = 0;
+uint64_t gDigiLiveOutputPacketCursor = 0;
+uint32_t gDigiLiveOutputPushInProgress = 0;
+uint64_t gDigiLiveOutputPushBusyCount = 0;
+uint64_t gDigiLiveOutputPushAttemptCount = 0;
+uint64_t gDigiLiveOutputPushSuccessCount = 0;
+uint64_t gDigiLiveOutputPacketWriteCount = 0;
+uint64_t gDigiLiveOutputFrameWriteCount = 0;
+uint64_t gDigiLiveOutputSilentFrameWriteCount = 0;
+uint64_t gDigiLiveOutputPlannedSilentFrameWriteCount = 0;
+uint64_t gDigiLiveOutputAudioStartCount = 0;
+uint64_t gDigiLiveOutputCursorCatchUpCount = 0;
+uint32_t gDigiLiveOutputLastCurrentPacketIndex = 0xffffffff;
+uint32_t gDigiLiveOutputLastStartPacketIndex = 0xffffffff;
+uint32_t gDigiLiveOutputLastPacketCount = 0;
+uint32_t gDigiLiveOutputLastFrameCount = 0;
+uint32_t gDigiLiveOutputLastSilentFrameCount = 0;
+uint32_t gDigiLiveOutputLastRingFillFrames = 0;
+uint32_t gDigiLiveOutputLastStartDistancePackets = 0xffffffff;
+uint32_t gDigiLiveOutputLastSyncRet = static_cast<uint32_t>(kIOReturnNotReady);
+DigiDotState gDigiLiveOutputDotState = {};
+uint32_t gDigiLiveOutputDotResetCount = 0;
+uint32_t gDigiLiveOutputDotLastInputWordBE = 0;
+uint32_t gDigiLiveOutputDotLastOutputWordBE = 0;
+uint32_t gDigiLiveOutputDotLastCarry = 0;
 uint32_t gDigiLiveSequenceReplayMovingQueueReadIndex = 0;
 uint32_t gDigiLiveSequenceReplayMovingQueueWriteIndex = 0;
 uint32_t gDigiLiveSequenceReplayMovingQueueCount = 0;
@@ -1290,9 +1368,26 @@ int32_t gAudioCapturePCM[kDigi00xDuplexIRCapturePCMFrameLimit]
 int32_t gAudioRingPCM[kAudioRingBufferFrameCount]
                      [kDigi00xDuplexIRCapturePCMChannelCount] = {};
 int32_t gAudioLastOutputFrame[kDigi00xDuplexIRCapturePCMChannelCount] = {};
+int32_t gAudioOutputRingPCM[kAudioOutputRingBufferFrameCount]
+                           [kAudioOutputChannelCount] = {};
 
 kern_return_t
 HarvestDigiLiveIsoStream();
+
+void
+ResetAudioOutputRingBuffer();
+
+void
+ClearAudioOutputBuffer();
+
+void
+ResetDigiLiveOutputState();
+
+void
+AppendAudioOutputBufferToRing(uint32_t frameCount, uint64_t sampleTime);
+
+kern_return_t
+PushAudioOutputToDigiLiveTransmit();
 
 uint32_t
 Digi00xDuplexDataBlocksForPacket(uint32_t packetIndex);
@@ -1366,6 +1461,67 @@ ToBigEndian32(uint32_t value)
            ((value & 0x0000ff00u) << 8) |
            ((value & 0x00ff0000u) >> 8) |
            ((value & 0xff000000u) >> 24);
+}
+
+uint8_t
+DigiDotSalt(uint8_t idx, uint32_t off)
+{
+    static const uint8_t len[16] = {
+        0, 1, 3, 5, 7, 9, 11, 13, 14, 12, 10, 8, 6, 4, 2, 0,
+    };
+    static const uint8_t nib[15] = {
+        0x8, 0x7, 0x9, 0x6, 0xa, 0x5, 0xb, 0x4, 0xc, 0x3, 0xd, 0x2, 0xe, 0x1, 0xf,
+    };
+    static const uint8_t hir[15] = {
+        0x0, 0x6, 0xf, 0x8, 0x7, 0x5, 0x3, 0x4, 0xc, 0xd, 0xe, 0x1, 0x2, 0xb, 0xa,
+    };
+    static const uint8_t hio[16] = {
+        0, 11, 12, 6, 7, 5, 1, 4, 3, 0x00, 14, 13, 8, 9, 10, 2,
+    };
+
+    uint8_t lowNibble = idx & 0x0fu;
+    uint8_t highNibble = (idx >> 4) & 0x0fu;
+    uint8_t highResult = highNibble == 0x9
+        ? 0x9
+        : hir[(hio[highNibble] + off) % 15];
+    if (len[lowNibble] < off) {
+        return 0;
+    }
+    return static_cast<uint8_t>(nib[14 + off - len[lowNibble]] | (highResult << 4));
+}
+
+void
+ResetDigiDotState(DigiDotState * state)
+{
+    if (state == nullptr) {
+        return;
+    }
+    state->carry = 0;
+    state->idx = 0;
+    state->off = 0;
+}
+
+uint32_t
+DigiDotEncodeAM824Word(DigiDotState * state, uint32_t wordBE)
+{
+    if (state == nullptr) {
+        return wordBE;
+    }
+
+    uint8_t magicByte = static_cast<uint8_t>((wordBE >> 8) & 0xffu);
+    if (magicByte != 0) {
+        state->off = 0;
+        state->idx = magicByte ^ state->carry;
+    }
+    magicByte ^= state->carry;
+    uint32_t encodedWordBE =
+        (wordBE & 0xffff00ffu) | (static_cast<uint32_t>(magicByte) << 8);
+    state->carry = DigiDotSalt(state->idx, ++state->off);
+
+    gDigiLiveOutputDotLastInputWordBE = wordBE;
+    gDigiLiveOutputDotLastOutputWordBE = encodedWordBE;
+    gDigiLiveOutputDotLastCarry = state->carry;
+    return encodedWordBE;
 }
 
 DigiLiveCIPHeader
@@ -1943,6 +2099,93 @@ PublishAudioRuntimeDiagnostics()
     AddNumberProperty(properties, "ProbeAudioRuntimeRingLastConsumeFrames", gAudioRingLastConsumeFrames, 32);
     AddNumberProperty(properties, "ProbeAudioRuntimeRingLastConsumeUnderrunFrames", gAudioRingLastConsumeUnderrunFrames, 32);
     AddNumberProperty(properties, "ProbeAudioRuntimeRingLastConsumeRepeatedFrames", gAudioRingLastConsumeRepeatedFrames, 32);
+    AddNumberProperty(properties, "ProbeAudioRuntimeOutputStreamEnabled", kAudioOutputStreamEnabled, 32);
+    AddNumberProperty(properties, "ProbeAudioRuntimeOutputStreamCreateRet", gAudioOutputStreamCreateRet, 32);
+    AddNumberProperty(properties, "ProbeAudioRuntimeOutputAddStreamRet", gAudioOutputAddStreamRet, 32);
+    AddNumberProperty(properties, "ProbeAudioRuntimeOutputStreamActiveRet", gAudioOutputStreamActiveRet, 32);
+    AddNumberProperty(properties, "ProbeAudioRuntimeOutputBufferCreateRet", gAudioOutputBufferCreateRet, 32);
+    AddNumberProperty(properties, "ProbeAudioRuntimeOutputBufferSetLengthRet", gAudioOutputBufferSetLengthRet, 32);
+    AddNumberProperty(properties, "ProbeAudioRuntimeOutputBufferRangeRet", gAudioOutputBufferRangeRet, 32);
+    AddNumberProperty(properties, "ProbeAudioRuntimeOutputBufferFrameCount", kAudioOutputBufferFrameCount, 32);
+    AddNumberProperty(properties, "ProbeAudioRuntimeOutputBufferBytes", kAudioOutputBufferBytes, 64);
+    AddNumberProperty(properties, "ProbeAudioRuntimeOutputCallbackCount", gAudioOutputCallbackCount, 32);
+    AddNumberProperty(properties, "ProbeAudioRuntimeOutputLastBufferFrameSize", gAudioOutputLastBufferFrameSize, 32);
+    AddNumberProperty(properties, "ProbeAudioRuntimeOutputLastSampleTime", gAudioOutputLastSampleTime, 64);
+    AddNumberProperty(properties, "ProbeAudioRuntimeOutputRingCapacityFrames", kAudioOutputRingBufferFrameCount, 32);
+    AddNumberProperty(properties, "ProbeAudioRuntimeOutputRingWriteFrame", gAudioOutputRingWriteFrame, 64);
+    AddNumberProperty(properties, "ProbeAudioRuntimeOutputRingReadFrame", gAudioOutputRingReadFrame, 64);
+    AddNumberProperty(properties, "ProbeAudioRuntimeOutputRingProducedFrames", gAudioOutputRingProducedFrames, 64);
+    AddNumberProperty(properties, "ProbeAudioRuntimeOutputRingConsumedFrames", gAudioOutputRingConsumedFrames, 64);
+    AddNumberProperty(properties, "ProbeAudioRuntimeOutputRingUnderrunFrames", gAudioOutputRingUnderrunFrames, 64);
+    AddNumberProperty(properties, "ProbeAudioRuntimeOutputRingOverrunFrames", gAudioOutputRingOverrunFrames, 64);
+    AddNumberProperty(properties, "ProbeAudioRuntimeOutputRingCurrentFillFrames", gAudioOutputRingCurrentFillFrames, 32);
+    AddNumberProperty(properties, "ProbeAudioRuntimeOutputRingMaxFillFrames", gAudioOutputRingMaxFillFrames, 32);
+    AddNumberProperty(properties, "ProbeAudioRuntimeOutputRingPrebufferFrames", kAudioOutputRingPrebufferFrames, 32);
+    AddNumberProperty(properties, "ProbeAudioRuntimeOutputRingKeepFrames", kAudioOutputRingKeepFrames, 32);
+    AddNumberProperty(properties, "ProbeAudioRuntimeOutputRingPrebuffered", gAudioOutputRingPrebuffered, 32);
+    AddNumberProperty(properties,
+                      "ProbeAudioRuntimeOutputRingPrebufferReadyCount",
+                      gAudioOutputRingPrebufferReadyCount,
+                      64);
+    AddNumberProperty(properties,
+                      "ProbeAudioRuntimeOutputRingPrebufferHoldCount",
+                      gAudioOutputRingPrebufferHoldCount,
+                      64);
+    AddNumberProperty(properties, "ProbeAudioRuntimeOutputRingAppendCount", gAudioOutputRingAppendCount, 32);
+    AddNumberProperty(properties, "ProbeAudioRuntimeOutputRingLastAppendFrames", gAudioOutputRingLastAppendFrames, 32);
+    AddNumberProperty(properties,
+                      "ProbeAudioRuntimeOutputRingLastAppendDroppedFrames",
+                      gAudioOutputRingLastAppendDroppedFrames,
+                      32);
+    AddNumberProperty(properties, "ProbeAudioRuntimeOutputRingLastConsumeFrames", gAudioOutputRingLastConsumeFrames, 32);
+    AddNumberProperty(properties,
+                      "ProbeAudioRuntimeOutputRingLastConsumeUnderrunFrames",
+                      gAudioOutputRingLastConsumeUnderrunFrames,
+                      32);
+    AddNumberProperty(properties, "ProbeDigiLiveOutputPayloadUpdateEnabled", kDigiLiveOutputPayloadUpdateEnabled, 32);
+    AddNumberProperty(properties, "ProbeDigiLiveOutputLeadPackets", kDigiLiveOutputLeadPackets, 32);
+    AddNumberProperty(properties, "ProbeDigiLiveOutputServiceAheadPackets", kDigiLiveOutputServiceAheadPackets, 32);
+    AddNumberProperty(properties, "ProbeDigiLiveOutputSilenceAheadPackets", kDigiLiveOutputSilenceAheadPackets, 32);
+    AddNumberProperty(properties, "ProbeDigiLiveOutputStopSilencePushCount", kDigiLiveOutputStopSilencePushCount, 32);
+    AddNumberProperty(properties, "ProbeDigiLiveOutputMaxPacketsPerPush", kDigiLiveOutputMaxPacketsPerPush, 32);
+    AddNumberProperty(properties, "ProbeDigiLiveOutputITHardwareCursorValid", gDigiLiveITHardwareCursorValid, 32);
+    AddNumberProperty(properties, "ProbeDigiLiveOutputITHardwarePacketCursor", gDigiLiveITHardwarePacketCursor, 64);
+    AddNumberProperty(properties, "ProbeDigiLiveOutputPacketCursorValid", gDigiLiveOutputPacketCursorValid, 32);
+    AddNumberProperty(properties, "ProbeDigiLiveOutputPacketCursor", gDigiLiveOutputPacketCursor, 64);
+    AddNumberProperty(properties, "ProbeDigiLiveOutputPushInProgress", gDigiLiveOutputPushInProgress, 32);
+    AddNumberProperty(properties, "ProbeDigiLiveOutputPushBusyCount", gDigiLiveOutputPushBusyCount, 64);
+    AddNumberProperty(properties, "ProbeDigiLiveOutputPushAttemptCount", gDigiLiveOutputPushAttemptCount, 64);
+    AddNumberProperty(properties, "ProbeDigiLiveOutputPushSuccessCount", gDigiLiveOutputPushSuccessCount, 64);
+    AddNumberProperty(properties, "ProbeDigiLiveOutputPacketWriteCount", gDigiLiveOutputPacketWriteCount, 64);
+    AddNumberProperty(properties, "ProbeDigiLiveOutputFrameWriteCount", gDigiLiveOutputFrameWriteCount, 64);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveOutputSilentFrameWriteCount",
+                      gDigiLiveOutputSilentFrameWriteCount,
+                      64);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveOutputPlannedSilentFrameWriteCount",
+                      gDigiLiveOutputPlannedSilentFrameWriteCount,
+                      64);
+    AddNumberProperty(properties, "ProbeDigiLiveOutputAudioStartCount", gDigiLiveOutputAudioStartCount, 64);
+    AddNumberProperty(properties, "ProbeDigiLiveOutputCursorCatchUpCount", gDigiLiveOutputCursorCatchUpCount, 64);
+    AddNumberProperty(properties, "ProbeDigiLiveOutputLastCurrentPacketIndex", gDigiLiveOutputLastCurrentPacketIndex, 32);
+    AddNumberProperty(properties, "ProbeDigiLiveOutputLastStartPacketIndex", gDigiLiveOutputLastStartPacketIndex, 32);
+    AddNumberProperty(properties, "ProbeDigiLiveOutputLastPacketCount", gDigiLiveOutputLastPacketCount, 32);
+    AddNumberProperty(properties, "ProbeDigiLiveOutputLastFrameCount", gDigiLiveOutputLastFrameCount, 32);
+    AddNumberProperty(properties, "ProbeDigiLiveOutputLastSilentFrameCount", gDigiLiveOutputLastSilentFrameCount, 32);
+    AddNumberProperty(properties, "ProbeDigiLiveOutputLastRingFillFrames", gDigiLiveOutputLastRingFillFrames, 32);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveOutputLastStartDistancePackets",
+                      gDigiLiveOutputLastStartDistancePackets,
+                      32);
+    AddNumberProperty(properties, "ProbeDigiLiveOutputLastSyncRet", gDigiLiveOutputLastSyncRet, 32);
+    AddNumberProperty(properties, "ProbeDigiLiveOutputDotResetCount", gDigiLiveOutputDotResetCount, 32);
+    AddNumberProperty(properties, "ProbeDigiLiveOutputDotCarry", gDigiLiveOutputDotState.carry, 32);
+    AddNumberProperty(properties, "ProbeDigiLiveOutputDotIndex", gDigiLiveOutputDotState.idx, 32);
+    AddNumberProperty(properties, "ProbeDigiLiveOutputDotOffset", gDigiLiveOutputDotState.off, 32);
+    AddNumberProperty(properties, "ProbeDigiLiveOutputDotLastInputWordBE", gDigiLiveOutputDotLastInputWordBE, 32);
+    AddNumberProperty(properties, "ProbeDigiLiveOutputDotLastOutputWordBE", gDigiLiveOutputDotLastOutputWordBE, 32);
+    AddNumberProperty(properties, "ProbeDigiLiveOutputDotLastCarry", gDigiLiveOutputDotLastCarry, 32);
     AddNumberProperty(properties, "ProbeDigiLiveStartAttemptCount", gDigiLiveStartAttemptCount, 32);
     AddNumberProperty(properties, "ProbeDigiLiveStartSuccessCount", gDigiLiveStartSuccessCount, 32);
     AddNumberProperty(properties, "ProbeDigiLiveStopAttemptCount", gDigiLiveStopAttemptCount, 32);
@@ -2632,6 +2875,46 @@ ResetAudioRingBuffer()
     }
 }
 
+uint32_t
+AudioOutputRingFillFrames()
+{
+    uint64_t fillFrames = gAudioOutputRingWriteFrame - gAudioOutputRingReadFrame;
+    if (fillFrames > kAudioOutputRingBufferFrameCount) {
+        fillFrames = kAudioOutputRingBufferFrameCount;
+    }
+    return static_cast<uint32_t>(fillFrames);
+}
+
+void
+UpdateAudioOutputRingFill()
+{
+    gAudioOutputRingCurrentFillFrames = AudioOutputRingFillFrames();
+    if (gAudioOutputRingCurrentFillFrames > gAudioOutputRingMaxFillFrames) {
+        gAudioOutputRingMaxFillFrames = gAudioOutputRingCurrentFillFrames;
+    }
+}
+
+void
+ResetAudioOutputRingBuffer()
+{
+    gAudioOutputRingWriteFrame = 0;
+    gAudioOutputRingReadFrame = 0;
+    gAudioOutputRingProducedFrames = 0;
+    gAudioOutputRingConsumedFrames = 0;
+    gAudioOutputRingUnderrunFrames = 0;
+    gAudioOutputRingOverrunFrames = 0;
+    gAudioOutputRingCurrentFillFrames = 0;
+    gAudioOutputRingMaxFillFrames = 0;
+    gAudioOutputRingAppendCount = 0;
+    gAudioOutputRingLastAppendFrames = 0;
+    gAudioOutputRingLastAppendDroppedFrames = 0;
+    gAudioOutputRingLastConsumeFrames = 0;
+    gAudioOutputRingLastConsumeUnderrunFrames = 0;
+    gAudioOutputRingPrebuffered = 0;
+    gAudioOutputRingPrebufferReadyCount = 0;
+    gAudioOutputRingPrebufferHoldCount = 0;
+}
+
 void
 HarvestDigiLiveForAudioCallback(uint32_t requestedFrameCount)
 {
@@ -2673,6 +2956,78 @@ ClearAudioInputBuffer()
             samples[frame * kDigi00xDuplexIRCapturePCMChannelCount + channel] = 0;
         }
     }
+}
+
+void
+ClearAudioOutputBuffer()
+{
+    if (gAudioOutputCPUAddress.address == 0 ||
+        gAudioOutputCPUAddress.length < kAudioOutputBufferBytes) {
+        return;
+    }
+
+    volatile int32_t * samples =
+        reinterpret_cast<volatile int32_t *>(gAudioOutputCPUAddress.address);
+    for (uint32_t frame = 0; frame < kAudioOutputBufferFrameCount; ++frame) {
+        for (uint32_t channel = 0; channel < kAudioOutputChannelCount; ++channel) {
+            samples[frame * kAudioOutputChannelCount + channel] = 0;
+        }
+    }
+}
+
+void
+AppendPCMFrameToAudioOutputRing(const int32_t samples[kAudioOutputChannelCount])
+{
+    if (gAudioOutputRingWriteFrame - gAudioOutputRingReadFrame >=
+        kAudioOutputRingBufferFrameCount) {
+        gAudioOutputRingReadFrame++;
+        gAudioOutputRingOverrunFrames++;
+        gAudioOutputRingLastAppendDroppedFrames++;
+    }
+
+    uint32_t ringFrame =
+        static_cast<uint32_t>(gAudioOutputRingWriteFrame %
+                              kAudioOutputRingBufferFrameCount);
+    for (uint32_t channel = 0; channel < kAudioOutputChannelCount; ++channel) {
+        gAudioOutputRingPCM[ringFrame][channel] = samples[channel];
+    }
+    __sync_synchronize();
+    gAudioOutputRingWriteFrame++;
+    gAudioOutputRingProducedFrames++;
+}
+
+void
+AppendAudioOutputBufferToRing(uint32_t frameCount, uint64_t sampleTime)
+{
+    if (gAudioOutputCPUAddress.address == 0 ||
+        gAudioOutputCPUAddress.length < kAudioOutputBufferBytes ||
+        frameCount == 0) {
+        gAudioOutputRingLastAppendFrames = 0;
+        gAudioOutputRingLastAppendDroppedFrames = 0;
+        return;
+    }
+
+    if (frameCount > kAudioOutputBufferFrameCount) {
+        frameCount = kAudioOutputBufferFrameCount;
+    }
+
+    volatile int32_t * samples =
+        reinterpret_cast<volatile int32_t *>(gAudioOutputCPUAddress.address);
+    gAudioOutputRingLastAppendDroppedFrames = 0;
+    for (uint32_t frame = 0; frame < frameCount; ++frame) {
+        uint32_t srcFrame =
+            static_cast<uint32_t>((sampleTime + frame) %
+                                  kAudioOutputBufferFrameCount);
+        int32_t frameSamples[kAudioOutputChannelCount] = {};
+        for (uint32_t channel = 0; channel < kAudioOutputChannelCount; ++channel) {
+            frameSamples[channel] =
+                samples[srcFrame * kAudioOutputChannelCount + channel];
+        }
+        AppendPCMFrameToAudioOutputRing(frameSamples);
+    }
+    gAudioOutputRingAppendCount++;
+    gAudioOutputRingLastAppendFrames = frameCount;
+    UpdateAudioOutputRingFill();
 }
 
 void
@@ -2912,11 +3267,17 @@ ConfigureAudioDevice(FireWireOHCIProbe * driver)
 
     gAudioDevice.reset();
     gAudioInputStream.reset();
+    gAudioOutputStream.reset();
     OSSafeReleaseNULL(gAudioInputBuffer);
+    OSSafeReleaseNULL(gAudioOutputBuffer);
     gAudioInputCPUAddress = {};
+    gAudioOutputCPUAddress = {};
     gAudioInputCallbackCount = 0;
     gAudioInputLastBufferFrameSize = 0;
     gAudioInputLastSampleTime = 0;
+    gAudioOutputCallbackCount = 0;
+    gAudioOutputLastBufferFrameSize = 0;
+    gAudioOutputLastSampleTime = 0;
     gAudioZeroTimestampHostTime = 0;
     gAudioStartDeviceCount = 0;
     gAudioStopDeviceCount = 0;
@@ -2924,6 +3285,12 @@ ConfigureAudioDevice(FireWireOHCIProbe * driver)
     gAudioStopDeviceObjectID = 0;
     gAudioDeviceStartIOCount = 0;
     gAudioDeviceStopIOCount = 0;
+    gAudioOutputStreamCreateRet = ReturnCodeToProperty(kIOReturnNotReady);
+    gAudioOutputAddStreamRet = ReturnCodeToProperty(kIOReturnNotReady);
+    gAudioOutputStreamActiveRet = ReturnCodeToProperty(kIOReturnNotReady);
+    gAudioOutputBufferCreateRet = ReturnCodeToProperty(kIOReturnNotReady);
+    gAudioOutputBufferSetLengthRet = ReturnCodeToProperty(kIOReturnNotReady);
+    gAudioOutputBufferRangeRet = ReturnCodeToProperty(kIOReturnNotReady);
     gAudioRefreshCaptureAttemptCount = 0;
     gAudioRefreshCaptureSuccessCount = 0;
     gAudioRefreshCaptureInProgress = 0;
@@ -3077,6 +3444,8 @@ ConfigureAudioDevice(FireWireOHCIProbe * driver)
     }
     gDigiLiveRxUnexpectedDataBlockCount = 0;
     ResetAudioRingBuffer();
+    ResetAudioOutputRingBuffer();
+    ResetDigiLiveOutputState();
     if (gAudioRefreshQueue == nullptr) {
         IODispatchQueueName queueName = "Digi003AudioRefresh";
         gAudioRefreshQueueCreateRet =
@@ -3110,6 +3479,30 @@ ConfigureAudioDevice(FireWireOHCIProbe * driver)
         return static_cast<kern_return_t>(gAudioBufferRangeRet);
     }
     ClearAudioInputBuffer();
+
+    if (kAudioOutputStreamEnabled != 0) {
+        gAudioOutputBufferCreateRet =
+            ReturnCodeToProperty(IOBufferMemoryDescriptor::Create(kIOMemoryDirectionInOut,
+                                                                  kAudioOutputBufferBytes,
+                                                                  4096,
+                                                                  &gAudioOutputBuffer));
+        if (gAudioOutputBufferCreateRet != ReturnCodeToProperty(kIOReturnSuccess)) {
+            return static_cast<kern_return_t>(gAudioOutputBufferCreateRet);
+        }
+
+        gAudioOutputBufferSetLengthRet =
+            ReturnCodeToProperty(gAudioOutputBuffer->SetLength(kAudioOutputBufferBytes));
+        if (gAudioOutputBufferSetLengthRet != ReturnCodeToProperty(kIOReturnSuccess)) {
+            return static_cast<kern_return_t>(gAudioOutputBufferSetLengthRet);
+        }
+
+        gAudioOutputBufferRangeRet =
+            ReturnCodeToProperty(gAudioOutputBuffer->GetAddressRange(&gAudioOutputCPUAddress));
+        if (gAudioOutputBufferRangeRet != ReturnCodeToProperty(kIOReturnSuccess)) {
+            return static_cast<kern_return_t>(gAudioOutputBufferRangeRet);
+        }
+        ClearAudioOutputBuffer();
+    }
 
     OSString * deviceUID = OSString::withCString("com.axelheckert.digi003.input");
     OSString * modelUID = OSString::withCString("Digidesign.003");
@@ -3146,10 +3539,12 @@ ConfigureAudioDevice(FireWireOHCIProbe * driver)
     SetAudioObjectName(gAudioDevice.get(), "Digi 003 FireWire");
     gAudioDevice->SetTransportType(IOUserAudioTransportType::FireWire);
     gAudioDevice->SetCanBeDefaultInputDevice(true);
-    gAudioDevice->SetCanBeDefaultOutputDevice(false);
+    gAudioDevice->SetCanBeDefaultOutputDevice(kAudioOutputStreamEnabled != 0);
     gAudioDevice->SetCanBeDefaultSystemOutputDevice(false);
     gAudioDevice->SetInputSafetyOffset(kAudioDeviceZeroTimestampPeriod);
+    gAudioDevice->SetOutputSafetyOffset(kAudioDeviceZeroTimestampPeriod);
     gAudioDevice->SetInputLatency(kAudioDeviceZeroTimestampPeriod);
+    gAudioDevice->SetOutputLatency(kAudioDeviceZeroTimestampPeriod);
     gAudioDevice->SetClockDomain(0);
     gAudioDevice->SetClockAlgorithm(IOUserAudioClockAlgorithm::Raw);
     gAudioDevice->SetClockIsStable(true);
@@ -3169,6 +3564,19 @@ ConfigureAudioDevice(FireWireOHCIProbe * driver)
         IOUserAudioChannelLabel::Unknown,
     };
     gAudioDevice->SetPreferredInputChannelLayout(inputLayout, kDigi00xDuplexIRCapturePCMChannelCount);
+    IOUserAudioChannelLabel outputLayout[kAudioOutputChannelCount] = {
+        IOUserAudioChannelLabel::Left,
+        IOUserAudioChannelLabel::Right,
+        IOUserAudioChannelLabel::Unknown,
+        IOUserAudioChannelLabel::Unknown,
+        IOUserAudioChannelLabel::Unknown,
+        IOUserAudioChannelLabel::Unknown,
+        IOUserAudioChannelLabel::Unknown,
+        IOUserAudioChannelLabel::Unknown,
+    };
+    if (kAudioOutputStreamEnabled != 0) {
+        gAudioDevice->SetPreferredOutputChannelLayout(outputLayout, kAudioOutputChannelCount);
+    }
     gAudioDevice->SetPreferredChannelsForStereo(1, 2);
 
     IOUserAudioStreamBasicDescription streamFormat = {};
@@ -3181,6 +3589,12 @@ ConfigureAudioDevice(FireWireOHCIProbe * driver)
     streamFormat.mBytesPerFrame = kAudioInputBytesPerFrame;
     streamFormat.mChannelsPerFrame = kDigi00xDuplexIRCapturePCMChannelCount;
     streamFormat.mBitsPerChannel = kAudioInputBytesPerSample * 8;
+
+    IOUserAudioStreamBasicDescription outputStreamFormat = streamFormat;
+    outputStreamFormat.mBytesPerPacket = kAudioOutputBytesPerFrame;
+    outputStreamFormat.mBytesPerFrame = kAudioOutputBytesPerFrame;
+    outputStreamFormat.mChannelsPerFrame = kAudioOutputChannelCount;
+    outputStreamFormat.mBitsPerChannel = kAudioOutputBytesPerSample * 8;
 
     gAudioInputStream = IOUserAudioStream::Create(driver,
                                                   IOUserAudioStreamDirection::Input,
@@ -3203,6 +3617,31 @@ ConfigureAudioDevice(FireWireOHCIProbe * driver)
         return static_cast<kern_return_t>(gAudioAddStreamRet);
     }
 
+    if (kAudioOutputStreamEnabled != 0) {
+        gAudioOutputStream = IOUserAudioStream::Create(driver,
+                                                       IOUserAudioStreamDirection::Output,
+                                                       gAudioOutputBuffer);
+        if (!gAudioOutputStream) {
+            gAudioOutputStreamCreateRet = ReturnCodeToProperty(kIOReturnNoMemory);
+            return kIOReturnNoMemory;
+        }
+        gAudioOutputStreamCreateRet = ReturnCodeToProperty(kIOReturnSuccess);
+        SetAudioObjectName(gAudioOutputStream.get(), "Digi 003 Outputs 1-8");
+        gAudioOutputStream->SetAvailableStreamFormats(&outputStreamFormat, 1);
+        gAudioOutputStream->SetCurrentStreamFormat(&outputStreamFormat);
+        gAudioOutputStream->SetTerminalType(IOUserAudioStreamTerminalType::Line);
+        gAudioOutputStream->SetStartingChannel(1);
+        gAudioOutputStream->SetLatency(kAudioDeviceZeroTimestampPeriod);
+        gAudioOutputStreamActiveRet =
+            ReturnCodeToProperty(gAudioOutputStream->SetStreamIsActive(true));
+
+        gAudioOutputAddStreamRet =
+            ReturnCodeToProperty(gAudioDevice->AddStream(gAudioOutputStream.get()));
+        if (gAudioOutputAddStreamRet != ReturnCodeToProperty(kIOReturnSuccess)) {
+            return static_cast<kern_return_t>(gAudioOutputAddStreamRet);
+        }
+    }
+
     IOOperationHandler ioOperation =
         ^kern_return_t(IOUserAudioObjectID in_device,
                        IOUserAudioIOOperation in_io_operation,
@@ -3217,6 +3656,13 @@ ConfigureAudioDevice(FireWireOHCIProbe * driver)
                 gAudioInputLastSampleTime = in_sample_time;
                 HarvestDigiLiveForAudioCallback(in_io_buffer_frame_size);
                 FillAudioInputBuffer(in_io_buffer_frame_size, in_sample_time);
+            } else if (in_io_operation == IOUserAudioIOOperationWriteEnd &&
+                       kAudioOutputStreamEnabled != 0) {
+                gAudioOutputCallbackCount++;
+                gAudioOutputLastBufferFrameSize = in_io_buffer_frame_size;
+                gAudioOutputLastSampleTime = in_sample_time;
+                AppendAudioOutputBufferToRing(in_io_buffer_frame_size, in_sample_time);
+                (void)PushAudioOutputToDigiLiveTransmit();
             }
             return kIOReturnSuccess;
         };
@@ -5273,6 +5719,8 @@ DigiLiveIRPacketIndexFromCommandPtr(uint32_t commandPtr,
 void
 ResetDigiLiveIRCommandPtrCursor()
 {
+    gDigiLiveITHardwareCursorValid = 0;
+    gDigiLiveITHardwarePacketCursor = 0;
     gDigiLiveIRCommandPtrPacketIndex = 0xffffffff;
     gDigiLiveIRHardwareCursorValid = 0;
     gDigiLiveIRHardwarePacketCursor = 0;
@@ -5288,6 +5736,64 @@ ResetDigiLiveIRCommandPtrCursor()
     gDigiLiveIRSegmentCatchUpLastHardwareIndex = 0xffffffff;
     gDigiLiveIRSegmentCatchUpLastSkippedPackets = 0;
     gDigiLiveIRSegmentCatchUpLastScannedSegments = 0;
+}
+
+void
+UpdateDigiLiveITCommandPtrCursor(uint32_t commandPtr, uint32_t itDescriptorDMA)
+{
+    uint32_t packetIndex = 0;
+    if (!DigiLiveITPacketIndexFromCommandPtr(commandPtr, itDescriptorDMA, &packetIndex)) {
+        gDigiLiveITHardwareCursorValid = 0;
+        gDigiLiveOutputLastCurrentPacketIndex = 0xffffffff;
+        return;
+    }
+
+    if (gDigiLiveITHardwareCursorValid == 0) {
+        gDigiLiveITHardwarePacketCursor = packetIndex;
+        gDigiLiveITHardwareCursorValid = 1;
+    } else {
+        uint32_t previousIndex =
+            static_cast<uint32_t>(gDigiLiveITHardwarePacketCursor %
+                                  kDigi00xDuplexITPacketCount);
+        uint32_t delta =
+            (packetIndex + kDigi00xDuplexITPacketCount - previousIndex) %
+            kDigi00xDuplexITPacketCount;
+        gDigiLiveITHardwarePacketCursor += delta;
+    }
+
+    gDigiLiveOutputLastCurrentPacketIndex = packetIndex;
+}
+
+void
+ResetDigiLiveOutputState()
+{
+    gDigiLiveITHardwareCursorValid = 0;
+    gDigiLiveITHardwarePacketCursor = 0;
+    gDigiLiveOutputPacketCursorValid = 0;
+    gDigiLiveOutputPacketCursor = 0;
+    gDigiLiveOutputPushInProgress = 0;
+    gDigiLiveOutputPushBusyCount = 0;
+    gDigiLiveOutputPushAttemptCount = 0;
+    gDigiLiveOutputPushSuccessCount = 0;
+    gDigiLiveOutputPacketWriteCount = 0;
+    gDigiLiveOutputFrameWriteCount = 0;
+    gDigiLiveOutputSilentFrameWriteCount = 0;
+    gDigiLiveOutputPlannedSilentFrameWriteCount = 0;
+    gDigiLiveOutputAudioStartCount = 0;
+    gDigiLiveOutputCursorCatchUpCount = 0;
+    gDigiLiveOutputLastCurrentPacketIndex = 0xffffffff;
+    gDigiLiveOutputLastStartPacketIndex = 0xffffffff;
+    gDigiLiveOutputLastPacketCount = 0;
+    gDigiLiveOutputLastFrameCount = 0;
+    gDigiLiveOutputLastSilentFrameCount = 0;
+    gDigiLiveOutputLastRingFillFrames = 0;
+    gDigiLiveOutputLastStartDistancePackets = 0xffffffff;
+    gDigiLiveOutputLastSyncRet = ReturnCodeToProperty(kIOReturnNotReady);
+    ResetDigiDotState(&gDigiLiveOutputDotState);
+    gDigiLiveOutputDotResetCount++;
+    gDigiLiveOutputDotLastInputWordBE = 0;
+    gDigiLiveOutputDotLastOutputWordBE = 0;
+    gDigiLiveOutputDotLastCarry = 0;
 }
 
 void
@@ -5561,6 +6067,291 @@ SyncDigiLiveTransmitReplayRange(uint32_t startPacket, uint32_t packetCount)
         return ret;
     }
     return SyncDigiLiveTransmitPacketRange(0, packetCount - firstCount);
+}
+
+kern_return_t
+SyncDigiLiveTransmitPayloadPacketRange(uint32_t startPacket, uint32_t packetCount)
+{
+    if (packetCount == 0) {
+        return kIOReturnSuccess;
+    }
+
+    uint64_t payloadOffset =
+        kDigi00xDuplexITPayloadOffset +
+        static_cast<uint64_t>(startPacket) * kDigiLiveITPayloadStrideBytes;
+    uint64_t payloadBytes =
+        static_cast<uint64_t>(packetCount) * kDigiLiveITPayloadStrideBytes;
+    return SyncDMABufferForDeviceRange(&gDigiLiveBuffer, payloadOffset, payloadBytes);
+}
+
+kern_return_t
+SyncDigiLiveTransmitPayloadReplayRange(uint32_t startPacket, uint32_t packetCount)
+{
+    if (packetCount == 0) {
+        return kIOReturnSuccess;
+    }
+    if (startPacket + packetCount <= kDigi00xDuplexITPacketCount) {
+        return SyncDigiLiveTransmitPayloadPacketRange(startPacket, packetCount);
+    }
+
+    uint32_t firstCount = kDigi00xDuplexITPacketCount - startPacket;
+    kern_return_t ret = SyncDigiLiveTransmitPayloadPacketRange(startPacket, firstCount);
+    if (ret != kIOReturnSuccess) {
+        return ret;
+    }
+    return SyncDigiLiveTransmitPayloadPacketRange(0, packetCount - firstCount);
+}
+
+bool
+PopAudioOutputRingFrame(int32_t samples[kAudioOutputChannelCount])
+{
+    if (samples == nullptr || gAudioOutputRingReadFrame >= gAudioOutputRingWriteFrame) {
+        return false;
+    }
+
+    uint32_t ringFrame =
+        static_cast<uint32_t>(gAudioOutputRingReadFrame %
+                              kAudioOutputRingBufferFrameCount);
+    for (uint32_t channel = 0; channel < kAudioOutputChannelCount; ++channel) {
+        samples[channel] = gAudioOutputRingPCM[ringFrame][channel];
+    }
+    gAudioOutputRingReadFrame++;
+    gAudioOutputRingConsumedFrames++;
+    return true;
+}
+
+uint32_t
+AudioOutputSampleToAM824WordBE(int32_t sample)
+{
+    uint32_t value24 = static_cast<uint32_t>(sample >> 8) & 0x00ffffffu;
+    return 0x40000000u | value24;
+}
+
+void
+WriteDigiLiveOutputTransmitDataBlock(volatile uint32_t * payload,
+                                     const int32_t samples[kAudioOutputChannelCount])
+{
+    payload[0] = ToBigEndian32(0x80000000u);
+    for (uint32_t channel = 0; channel < kDigi00xDuplexPCMAudioChannels; ++channel) {
+        int32_t sample = channel < kAudioOutputChannelCount ? samples[channel] : 0;
+        uint32_t wordBE = AudioOutputSampleToAM824WordBE(sample);
+        uint32_t encodedWordBE = DigiDotEncodeAM824Word(&gDigiLiveOutputDotState, wordBE);
+        payload[1 + channel] = ToBigEndian32(encodedWordBE);
+    }
+}
+
+struct ScopedDigiLiveOutputPushGuard {
+    bool acquired;
+
+    ScopedDigiLiveOutputPushGuard()
+        : acquired(__sync_lock_test_and_set(&gDigiLiveOutputPushInProgress, 1) == 0)
+    {
+    }
+
+    ~ScopedDigiLiveOutputPushGuard()
+    {
+        if (acquired) {
+            __sync_lock_release(&gDigiLiveOutputPushInProgress);
+        }
+    }
+};
+
+kern_return_t
+PushAudioOutputToDigiLiveTransmit()
+{
+    if (kAudioOutputStreamEnabled == 0 ||
+        kDigiLiveOutputPayloadUpdateEnabled == 0 ||
+        gDigiLiveRunning == 0 ||
+        gDigiLiveBuffer.cpuRange.address == 0 ||
+        gDigiLiveBuffer.command == nullptr ||
+        gPCIDevice == nullptr ||
+        gPCIMemoryIndex == 0xff) {
+        gDigiLiveOutputLastSyncRet = ReturnCodeToProperty(kIOReturnNotReady);
+        return kIOReturnNotReady;
+    }
+
+    ScopedDigiLiveOutputPushGuard pushGuard;
+    if (!pushGuard.acquired) {
+        gDigiLiveOutputPushBusyCount++;
+        gDigiLiveOutputLastSyncRet = ReturnCodeToProperty(kIOReturnBusy);
+        return kIOReturnBusy;
+    }
+
+    gDigiLiveOutputPushAttemptCount++;
+    gDigiLiveOutputLastPacketCount = 0;
+    gDigiLiveOutputLastFrameCount = 0;
+    gDigiLiveOutputLastSilentFrameCount = 0;
+    uint32_t ringFillFrames = AudioOutputRingFillFrames();
+    gDigiLiveOutputLastRingFillFrames = ringFillFrames;
+    bool audioJustStarted = false;
+    bool audioReady = false;
+    uint32_t frameBudget = 0;
+    if (ringFillFrames == 0) {
+        gAudioOutputRingPrebuffered = 0;
+    } else if (gAudioOutputRingPrebuffered == 0) {
+        if (ringFillFrames < kAudioOutputRingPrebufferFrames) {
+            gAudioOutputRingPrebufferHoldCount++;
+        } else {
+            gAudioOutputRingPrebuffered = 1;
+            gAudioOutputRingPrebufferReadyCount++;
+            gDigiLiveOutputAudioStartCount++;
+            audioJustStarted = true;
+        }
+    }
+    if (gAudioOutputRingPrebuffered != 0 && ringFillFrames > kAudioOutputRingKeepFrames) {
+        audioReady = true;
+        frameBudget = ringFillFrames - kAudioOutputRingKeepFrames;
+    } else if (ringFillFrames != 0) {
+        gAudioOutputRingPrebufferHoldCount++;
+    }
+
+    uint32_t dmaBase = static_cast<uint32_t>(gDigiLiveBuffer.dmaSegment.address);
+    uint32_t itDescriptorDMA = dmaBase + kDigi00xDuplexITDescriptorOffset;
+    gPCIDevice->MemoryRead32(gPCIMemoryIndex,
+                             OhciIsoXmitCommandPtrOffset(kDigi00xDuplexContextIndex),
+                             &gDigiLiveITCommandPtrLastRead);
+    UpdateDigiLiveITCommandPtrCursor(gDigiLiveITCommandPtrLastRead, itDescriptorDMA);
+    if (gDigiLiveITHardwareCursorValid == 0) {
+        gDigiLiveOutputLastSyncRet = ReturnCodeToProperty(kIOReturnBadArgument);
+        return kIOReturnBadArgument;
+    }
+
+    uint64_t safeStartCursor =
+        gDigiLiveITHardwarePacketCursor + kDigiLiveOutputLeadPackets;
+    uint64_t safeEndCursor =
+        gDigiLiveITHardwarePacketCursor +
+        kDigi00xDuplexITPacketCount -
+        kDigiLiveOutputLeadPackets;
+    uint32_t targetAheadPackets = audioReady ?
+        kDigiLiveOutputServiceAheadPackets :
+        kDigiLiveOutputSilenceAheadPackets;
+    uint64_t targetEndCursor = safeStartCursor + targetAheadPackets;
+    if (targetEndCursor > safeEndCursor) {
+        targetEndCursor = safeEndCursor;
+    }
+    if (gDigiLiveOutputPacketCursorValid == 0 ||
+        gDigiLiveOutputPacketCursor < safeStartCursor ||
+        audioJustStarted) {
+        if (gDigiLiveOutputPacketCursorValid != 0 &&
+            gDigiLiveOutputPacketCursor < safeStartCursor) {
+            gDigiLiveOutputCursorCatchUpCount++;
+        }
+        gDigiLiveOutputPacketCursor = safeStartCursor;
+        gDigiLiveOutputPacketCursorValid = 1;
+        ResetDigiDotState(&gDigiLiveOutputDotState);
+        gDigiLiveOutputDotResetCount++;
+    }
+    if (gDigiLiveOutputPacketCursor >= safeEndCursor) {
+        gDigiLiveOutputLastSyncRet = ReturnCodeToProperty(kIOReturnBusy);
+        return kIOReturnBusy;
+    }
+    if (gDigiLiveOutputPacketCursor >= targetEndCursor) {
+        gDigiLiveOutputLastSyncRet = ReturnCodeToProperty(kIOReturnNotReady);
+        return kIOReturnNotReady;
+    }
+
+    uint32_t writablePackets =
+        static_cast<uint32_t>(targetEndCursor - gDigiLiveOutputPacketCursor);
+    if (writablePackets > kDigiLiveOutputMaxPacketsPerPush) {
+        writablePackets = kDigiLiveOutputMaxPacketsPerPush;
+    }
+    if (writablePackets == 0) {
+        gDigiLiveOutputLastSyncRet = ReturnCodeToProperty(kIOReturnBusy);
+        return kIOReturnBusy;
+    }
+
+    volatile uint32_t * itPayloadStorage =
+        reinterpret_cast<volatile uint32_t *>(gDigiLiveBuffer.cpuRange.address +
+                                              kDigi00xDuplexITPayloadOffset);
+    uint64_t startCursor = gDigiLiveOutputPacketCursor;
+    uint32_t startPacket =
+        static_cast<uint32_t>(startCursor % kDigi00xDuplexITPacketCount);
+    uint32_t currentPacket =
+        static_cast<uint32_t>(gDigiLiveITHardwarePacketCursor %
+                              kDigi00xDuplexITPacketCount);
+    uint32_t startDistance =
+        static_cast<uint32_t>((startPacket + kDigi00xDuplexITPacketCount -
+                               currentPacket) %
+                              kDigi00xDuplexITPacketCount);
+
+    uint32_t writtenPackets = 0;
+    uint32_t writtenFrames = 0;
+    uint32_t underrunSilentFrames = 0;
+    uint32_t plannedSilentFrames = 0;
+    for (uint32_t packetOffset = 0; packetOffset < writablePackets; ++packetOffset) {
+        uint32_t packetIndex =
+            static_cast<uint32_t>((gDigiLiveOutputPacketCursor + packetOffset) %
+                                  kDigi00xDuplexITPacketCount);
+        uint32_t dataBlocks = gDigiLiveTxDataBlocks[packetIndex];
+        if (dataBlocks != 5 && dataBlocks != 6) {
+            dataBlocks = Digi00xDuplexDataBlocksForPacket(packetIndex);
+        }
+        if (audioReady && frameBudget < dataBlocks) {
+            break;
+        }
+
+        volatile uint32_t * payload =
+            itPayloadStorage +
+            ((packetIndex * kDigiLiveITPayloadStrideBytes) / sizeof(uint32_t));
+        for (uint32_t block = 0; block < dataBlocks; ++block) {
+            if (audioReady) {
+                int32_t frameSamples[kAudioOutputChannelCount] = {};
+                if (PopAudioOutputRingFrame(frameSamples)) {
+                    WriteDigiLiveOutputTransmitDataBlock(payload, frameSamples);
+                    writtenFrames++;
+                } else {
+                    if (underrunSilentFrames == 0) {
+                        ResetDigiDotState(&gDigiLiveOutputDotState);
+                        gDigiLiveOutputDotResetCount++;
+                    }
+                    WriteDigiLiveSilentTransmitDataBlock(payload);
+                    underrunSilentFrames++;
+                }
+            } else {
+                WriteDigiLiveSilentTransmitDataBlock(payload);
+                plannedSilentFrames++;
+            }
+            payload += kDigi00xDuplexDataBlockQuadlets;
+        }
+
+        writtenPackets++;
+        if (audioReady) {
+            frameBudget -= dataBlocks;
+        }
+    }
+
+    if (writtenPackets == 0) {
+        gDigiLiveOutputLastSyncRet = ReturnCodeToProperty(kIOReturnNotReady);
+        return kIOReturnNotReady;
+    }
+
+    __sync_synchronize();
+    kern_return_t syncRet =
+        SyncDigiLiveTransmitPayloadReplayRange(startPacket, writtenPackets);
+    gDigiLiveOutputLastSyncRet = ReturnCodeToProperty(syncRet);
+    gDigiLiveOutputLastStartPacketIndex = startPacket;
+    gDigiLiveOutputLastStartDistancePackets = startDistance;
+    gDigiLiveOutputLastPacketCount = writtenPackets;
+    gDigiLiveOutputLastFrameCount = writtenFrames;
+    gDigiLiveOutputLastSilentFrameCount = plannedSilentFrames + underrunSilentFrames;
+    gAudioOutputRingLastConsumeFrames = writtenFrames;
+    gAudioOutputRingLastConsumeUnderrunFrames = underrunSilentFrames;
+    gAudioOutputRingUnderrunFrames += underrunSilentFrames;
+    UpdateAudioOutputRingFill();
+    if (syncRet != kIOReturnSuccess) {
+        return syncRet;
+    }
+
+    gDigiLiveOutputPacketCursor += writtenPackets;
+    gDigiLiveOutputPushSuccessCount++;
+    gDigiLiveOutputPacketWriteCount += writtenPackets;
+    gDigiLiveOutputFrameWriteCount += writtenFrames;
+    gDigiLiveOutputSilentFrameWriteCount += plannedSilentFrames + underrunSilentFrames;
+    gDigiLiveOutputPlannedSilentFrameWriteCount += plannedSilentFrames;
+    uint64_t itControlSet = OhciIsoXmitContextControlSetOffset(kDigi00xDuplexContextIndex);
+    gPCIDevice->MemoryWrite32(gPCIMemoryIndex, itControlSet, kContextWake);
+    gPCIDevice->MemoryRead32(gPCIMemoryIndex, itControlSet, &gDigiLiveITControlAfterRun);
+    return kIOReturnSuccess;
 }
 
 uint32_t
@@ -7427,6 +8218,7 @@ StartDigiLiveStreamForAudio()
     gDigiLiveLastHarvestLabelMismatchCount = 0;
     ResetDigiLiveReceiveStreamDiagnostics();
     ResetDigiLiveSequenceReplayState();
+    ResetDigiLiveOutputState();
 
     kern_return_t ret = RunDigiLiveBeginTransactions();
     if (ret == kIOReturnSuccess) {
@@ -9005,6 +9797,7 @@ StartAudioRefreshWorker()
             gAudioRefreshWorkerLastGeneration = gAudioCaptureGeneration;
 
             if (gDigiLiveRunning != 0) {
+                (void)PushAudioOutputToDigiLiveTransmit();
                 if ((gAudioRefreshWorkerIterationCount % kDigiLiveWorkerPublishInterval) == 0) {
                     gAudioRefreshWorkerLivePublishCount++;
                     PublishAudioRuntimeDiagnostics();
@@ -9595,9 +10388,12 @@ IMPL(FireWireOHCIProbe, Start)
         AddNumberProperty(diagnostics, "ProbeAudioDeviceCreateRet", gAudioDeviceCreateRet, 32);
         AddNumberProperty(diagnostics, "ProbeAudioStreamCreateRet", gAudioStreamCreateRet, 32);
         AddNumberProperty(diagnostics, "ProbeAudioAddStreamRet", gAudioAddStreamRet, 32);
+        AddNumberProperty(diagnostics, "ProbeAudioOutputStreamCreateRet", gAudioOutputStreamCreateRet, 32);
+        AddNumberProperty(diagnostics, "ProbeAudioOutputAddStreamRet", gAudioOutputAddStreamRet, 32);
         AddNumberProperty(diagnostics, "ProbeAudioAddObjectRet", gAudioAddObjectRet, 32);
         AddNumberProperty(diagnostics, "ProbeAudioIOHandlerRet", gAudioIOHandlerRet, 32);
         AddNumberProperty(diagnostics, "ProbeAudioStreamActiveRet", gAudioStreamActiveRet, 32);
+        AddNumberProperty(diagnostics, "ProbeAudioOutputStreamActiveRet", gAudioOutputStreamActiveRet, 32);
         AddNumberProperty(diagnostics, "ProbeAudioRegisterIOThreadRet", gAudioRegisterIOThreadRet, 32);
         AddNumberProperty(diagnostics, "ProbeAudioStartIOThreadRet", gAudioStartIOThreadRet, 32);
         AddNumberProperty(diagnostics, "ProbeAudioStartDeviceCount", gAudioStartDeviceCount, 32);
@@ -9609,14 +10405,27 @@ IMPL(FireWireOHCIProbe, Start)
         AddNumberProperty(diagnostics, "ProbeAudioBufferCreateRet", gAudioBufferCreateRet, 32);
         AddNumberProperty(diagnostics, "ProbeAudioBufferSetLengthRet", gAudioBufferSetLengthRet, 32);
         AddNumberProperty(diagnostics, "ProbeAudioBufferRangeRet", gAudioBufferRangeRet, 32);
+        AddNumberProperty(diagnostics, "ProbeAudioOutputBufferCreateRet", gAudioOutputBufferCreateRet, 32);
+        AddNumberProperty(diagnostics, "ProbeAudioOutputBufferSetLengthRet", gAudioOutputBufferSetLengthRet, 32);
+        AddNumberProperty(diagnostics, "ProbeAudioOutputBufferRangeRet", gAudioOutputBufferRangeRet, 32);
         AddNumberProperty(diagnostics, "ProbeAudioBufferFrameCount", kAudioInputBufferFrameCount, 32);
         AddNumberProperty(diagnostics, "ProbeAudioBufferBytes", kAudioInputBufferBytes, 64);
+        AddNumberProperty(diagnostics, "ProbeAudioOutputBufferFrameCount", kAudioOutputBufferFrameCount, 32);
+        AddNumberProperty(diagnostics, "ProbeAudioOutputBufferBytes", kAudioOutputBufferBytes, 64);
         AddNumberProperty(diagnostics, "ProbeAudioRingBufferFrameCount", kAudioRingBufferFrameCount, 32);
+        AddNumberProperty(diagnostics, "ProbeAudioOutputRingBufferFrameCount", kAudioOutputRingBufferFrameCount, 32);
+        AddNumberProperty(diagnostics, "ProbeAudioOutputRingPrebufferFrames", kAudioOutputRingPrebufferFrames, 32);
+        AddNumberProperty(diagnostics, "ProbeAudioOutputRingKeepFrames", kAudioOutputRingKeepFrames, 32);
+        AddNumberProperty(diagnostics, "ProbeDigiLiveOutputServiceAheadPackets", kDigiLiveOutputServiceAheadPackets, 32);
+        AddNumberProperty(diagnostics, "ProbeDigiLiveOutputSilenceAheadPackets", kDigiLiveOutputSilenceAheadPackets, 32);
         AddNumberProperty(diagnostics, "ProbeAudioCaptureFrameCount", gAudioCaptureFrameCount, 32);
         AddNumberProperty(diagnostics, "ProbeAudioCapturePeakAbs", gAudioCapturePeakAbs, 32);
         AddNumberProperty(diagnostics, "ProbeAudioInputCallbackCount", gAudioInputCallbackCount, 32);
         AddNumberProperty(diagnostics, "ProbeAudioInputLastBufferFrameSize", gAudioInputLastBufferFrameSize, 32);
         AddNumberProperty(diagnostics, "ProbeAudioInputLastSampleTime", gAudioInputLastSampleTime, 64);
+        AddNumberProperty(diagnostics, "ProbeAudioOutputCallbackCount", gAudioOutputCallbackCount, 32);
+        AddNumberProperty(diagnostics, "ProbeAudioOutputLastBufferFrameSize", gAudioOutputLastBufferFrameSize, 32);
+        AddNumberProperty(diagnostics, "ProbeAudioOutputLastSampleTime", gAudioOutputLastSampleTime, 64);
         AddNumberProperty(diagnostics, "ProbeAudioZeroTimestampHostTime", gAudioZeroTimestampHostTime, 64);
         AddNumberProperty(diagnostics, "ProbeSoftwareResetRet", ReturnCodeToProperty(softwareResetRet), 32);
         AddNumberProperty(diagnostics, "ProbeSoftwareResetBefore", softwareResetBefore, 32);
@@ -10553,7 +11362,10 @@ FireWireOHCIProbe::StartDevice(IOUserAudioObjectID in_object_id,
     StopAudioRefreshWorker(true);
     StopDigiLiveStreamForAudio();
     ResetAudioRingBuffer();
+    ResetAudioOutputRingBuffer();
+    ResetDigiLiveOutputState();
     ClearAudioInputBuffer();
+    ClearAudioOutputBuffer();
     kern_return_t liveRet = StartDigiLiveStreamForAudio();
     if (liveRet != kIOReturnSuccess) {
         RefreshDigiCaptureForAudio();
@@ -10571,6 +11383,10 @@ FireWireOHCIProbe::StartDevice(IOUserAudioObjectID in_object_id,
     if (gAudioInputStream) {
         gAudioStreamActiveRet = ReturnCodeToProperty(gAudioInputStream->SetStreamIsActive(true));
     }
+    if (gAudioOutputStream) {
+        gAudioOutputStreamActiveRet =
+            ReturnCodeToProperty(gAudioOutputStream->SetStreamIsActive(true));
+    }
     kern_return_t ret = IOUserAudioDriver::StartDevice(in_object_id, in_flags);
     gAudioStartDeviceRet = ReturnCodeToProperty(ret);
     PublishAudioRuntimeDiagnostics();
@@ -10586,9 +11402,19 @@ FireWireOHCIProbe::StopDevice(IOUserAudioObjectID in_object_id,
     if (gAudioInputStream) {
         gAudioStreamActiveRet = ReturnCodeToProperty(gAudioInputStream->SetStreamIsActive(false));
     }
+    if (gAudioOutputStream) {
+        gAudioOutputStreamActiveRet =
+            ReturnCodeToProperty(gAudioOutputStream->SetStreamIsActive(false));
+    }
     kern_return_t ret = IOUserAudioDriver::StopDevice(in_object_id, in_flags);
     gAudioStopDeviceRet = ReturnCodeToProperty(ret);
     StopAudioRefreshWorker(true);
+    gAudioOutputRingReadFrame = gAudioOutputRingWriteFrame;
+    gAudioOutputRingPrebuffered = 0;
+    UpdateAudioOutputRingFill();
+    for (uint32_t i = 0; i < kDigiLiveOutputStopSilencePushCount; ++i) {
+        (void)PushAudioOutputToDigiLiveTransmit();
+    }
     StopDigiLiveStreamForAudio();
     PublishAudioRuntimeDiagnostics();
     return ret;
@@ -10689,14 +11515,17 @@ IMPL(FireWireOHCIProbe, Stop)
     if (gAudioDevice) {
         RemoveObject(gAudioDevice.get());
     }
+    gAudioOutputStream.reset();
     gAudioInputStream.reset();
     gAudioDevice.reset();
+    OSSafeReleaseNULL(gAudioOutputBuffer);
     OSSafeReleaseNULL(gAudioInputBuffer);
     if (gAudioRefreshQueue != nullptr) {
         gAudioRefreshQueue->Cancel(nullptr);
         OSSafeReleaseNULL(gAudioRefreshQueue);
     }
     gAudioInputCPUAddress = {};
+    gAudioOutputCPUAddress = {};
     gDriverInstance = nullptr;
     ReleaseDMABuffer(&gSelfIDBuffer);
     ReleaseDMABuffer(&gConfigROMBuffer);
