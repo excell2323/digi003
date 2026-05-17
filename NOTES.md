@@ -8,7 +8,7 @@ Current active local version:
 
 - Driver: `com.axelheckert.driver.FireWireOHCIProbe`
 - Host app: `com.axelheckert.FireWireOHCIProbeLoader`
-- Version: `0.2.63/263`
+- Version: `0.2.98/298`
 - Team ID used locally: `7H3ND356AV`
 - Controller: `pci11c1,5901` / IEEE 1394 Open HCI
 
@@ -353,11 +353,258 @@ empty_poll_count=0
 Captures/coreaudio-digi003-test-0.2.63-cmdptr-catchup-scan-run2-3s.wav
 repeated_frames=5483
 unique_frames=2043
+
+Captures/coreaudio-digi003-test-0.2.63-cmdptr-catchup-scan-10s.wav
+total_repeated_frames=26979
+after_1s_repeated_frames=19328
+ring_produced_frames=416226
+ring_consumed_frames=416052
+ring_repeated_frames=25116
 ```
 
 Interpretation:
 
-This is the new best live CoreAudio capture by a large margin. The harvester now stays close to the expected 44.1 kHz frame rate, and scanning recovers many descriptors that the blind 0.2.62 jump would have skipped. Remaining repeat frames are now small enough that the next work should focus on tighter ring/backpressure behavior and the remaining RX DBC/cycle discontinuities rather than wholesale receive-ring redesign.
+This is the new best live CoreAudio capture by a large margin. The 3-second captures can be nearly clean after the startup silence. A 10-second capture shows the remaining issue more clearly: the harvester still falls behind the 44.1 kHz consumer over longer runs, producing about 416k frames while CoreAudio consumes 441k frames. Remaining repeat frames are now a worker/backpressure problem more than a receive-ring shape problem.
+
+### 0.2.64 low-water worker experiment
+
+This build keeps the 0.2.63 catch-up scan and sets `ProbeDigiLiveWorkerLowWaterFrames = 4096`, so the background harvest worker skips its normal 1 ms sleep whenever the audio ring has less than 4096 frames buffered. The goal is to reduce long-run underruns without doing FireWire harvesting directly in the CoreAudio IO callback.
+
+Test result:
+
+```text
+Captures/coreaudio-digi003-test-0.2.64-lowwater4096-10s.wav
+total_repeated_frames=77835
+after_1s_repeated_frames=72040
+ring_produced_frames=359478
+ring_repeated_frames=82334
+empty_poll_count=34373
+worker_low_water_no_sleep_count=79359
+```
+
+Interpretation:
+
+This is worse than 0.2.63. The low-water no-sleep rule also fired when the previous harvest returned no packet, causing a tight empty-poll loop that starved useful work instead of improving throughput.
+
+### 0.2.65 successful-harvest low-water experiment
+
+This build keeps the low-water idea but makes it conservative: `ProbeDigiLiveWorkerLowWaterFrames = 2048`, and the worker skips sleep only when the previous harvest succeeded. If no packet is ready, it sleeps normally. The goal is to gain a little long-run headroom without recreating the 0.2.64 empty-poll storm.
+
+Test result:
+
+```text
+Captures/coreaudio-digi003-test-0.2.65-lowwater2048-successonly-10s.wav
+total_repeated_frames=34710
+after_1s_repeated_frames=26371
+ring_produced_frames=426474
+ring_repeated_frames=35986
+ring_overrun_frames=4476
+empty_poll_count=1144
+```
+
+Interpretation:
+
+This is still worse than 0.2.63. It avoids the 0.2.64 empty-poll storm, but produces bursts too late and can overfill the ring after underruns have already happened.
+
+### 0.2.66 callback low-water harvest experiment
+
+This build returns `ProbeDigiLiveWorkerLowWaterFrames` to `0` and enables `ProbeAudioRuntimeInputCallbackHarvestEnabled = 1` with at most two harvest attempts from the CoreAudio read callback when ring fill is below the callback request plus 2048 frames. The goal is to recover just-in-time before an underrun without spinning the background worker.
+
+Test result:
+
+```text
+Captures/coreaudio-digi003-test-0.2.66-callbackharvest2-10s.wav
+total_repeated_frames=21431
+after_1s_repeated_frames=13944
+ring_produced_frames=422365
+ring_repeated_frames=20039
+callback_harvest_success_count=4922
+callback_harvest_attempt_count=11897
+```
+
+Interpretation:
+
+This improves the 10-second run compared with 0.2.63 and avoids the 0.2.64/0.2.65 worker scheduling regressions. The ring still stays low, so the next test raises the callback harvest cap from two attempts to four.
+
+### 0.2.67 callback harvest depth experiment
+
+This build keeps 0.2.66 but raises `ProbeAudioRuntimeInputCallbackHarvestMaxAttempts` from 2 to 4. The goal is to see whether a little more just-in-time harvest depth can cover the remaining long-run underrun bursts without blocking the IO callback too much.
+
+Test result:
+
+```text
+Captures/coreaudio-digi003-test-0.2.67-callbackharvest4-10s.wav
+total_repeated_frames=21379
+after_1s_repeated_frames=13824
+last_5s_repeated_frames=9344
+per_second_repeated_frames=7555 0 0 3136 1344 2816 2077 3618 468 364
+ring_produced_frames=438256
+ring_consumed_frames=417326
+ring_repeated_frames=23842
+ring_overrun_frames=4546
+ring_current_fill_frames=16384
+callback_harvest_success_count=4932
+callback_harvest_attempt_count=12282
+```
+
+Repeat run:
+
+```text
+Captures/coreaudio-digi003-test-0.2.67-callbackharvest4-run2-10s.wav
+total_repeated_frames=23328
+after_1s_repeated_frames=20273
+last_5s_repeated_frames=15921
+per_second_repeated_frames=3055 0 0 430 3922 1984 848 5443 5357 2289
+```
+
+Live diagnostics during the repeat run showed `ring_overrun_frames=0` while the recorder was still active and the ring running low (`ring_current_fill_frames` near 35 by the late capture window). The full ring and overrun counters appeared after the recorder exited, because harvesting continued while no CoreAudio client consumed frames.
+
+Interpretation:
+
+The 10-second capture shows the repeat problem is not only an initial startup artifact. 0.2.67 is sometimes marginally better than 0.2.66 in the WAV-level repeated-frame metric, but the repeat run is worse. A deeper callback harvest can move the underrun bursts around and improve some windows, but it is not a stable sync solution by itself. The active-capture failure mode is still low ring fill/underrun, not sustained overrun.
+
+### 0.2.68 active-capture catch-up experiment
+
+This build keeps the 0.2.67 callback harvest depth and adds active-capture diagnostics around the CoreAudio read callback. It also lets the background harvest worker use a short catch-up path only while recent read callbacks are active and the ring is below 4096 frames. If fill is below 1024 frames it skips the worker sleep after a successful harvest; otherwise it uses a 125 us delay instead of the normal 1 ms sleep. Empty polls still sleep normally so this should avoid the 0.2.64 empty-poll storm.
+
+Test result:
+
+```text
+Captures/coreaudio-digi003-test-0.2.68-activecatchup-10s.wav
+total_repeated_frames=34171
+after_1s_repeated_frames=26724
+last_5s_repeated_frames=22161
+per_second_repeated_frames=7447 0 1024 3264 274 6829 3031 4264 3001 5035
+active_underrun_frames=31170
+active_overrun_frames=0
+worker_active_catchup_no_sleep_count=2794
+worker_active_catchup_delay_count=422
+```
+
+Interpretation:
+
+This is worse than 0.2.67. The active diagnostics were useful: during the capture the failure mode is still active underrun, not active overrun. The catch-up worker path also increased empty polls and did not keep the ring above the callback request, so the behavior is disabled again in 0.2.69 while keeping the diagnostics.
+
+### 0.2.69 active diagnostics only
+
+This build keeps the 0.2.67 callback harvest behavior and disables the 0.2.68 active-catch-up worker path (`kDigiLiveActiveCaptureCatchUpEnabled = 0`). The active-capture diagnostics remain so future 10-second captures can distinguish active underrun/overrun from post-capture ring fill.
+
+Test result:
+
+```text
+Captures/coreaudio-digi003-test-0.2.69-active-diag-only-10s.wav
+total_repeated_frames=37911
+after_1s_repeated_frames=31260
+last_5s_repeated_frames=23452
+per_second_repeated_frames=6651 0 0 1920 5888 3712 5056 4528 10128 28
+```
+
+Interpretation:
+
+Even the extra IO-callback diagnostics are too expensive in the current hot path and made the capture worse than 0.2.67. 0.2.70 removes the active-capture diagnostic/catch-up code and returns to the 0.2.67 runtime behavior with only the callback harvest depth of four.
+
+### 0.2.70 return to best runtime behavior
+
+This build removes the 0.2.68/0.2.69 active-capture instrumentation from the realtime path. It keeps `ProbeAudioRuntimeInputCallbackHarvestEnabled = 1`, `ProbeAudioRuntimeInputCallbackHarvestMaxAttempts = 4`, and `ProbeDigiLiveWorkerLowWaterFrames = 0`.
+
+Test result:
+
+```text
+Captures/coreaudio-digi003-test-0.2.70-return-067-runtime-10s.wav
+total_repeated_frames=32424
+after_1s_repeated_frames=25408
+last_5s_repeated_frames=14464
+per_second_repeated_frames=7016 0 3904 1580 5460 0 3748 5467 4032 1216
+ring_repeated_frames=23945
+ring_overrun_frames=4463
+callback_harvest_success_count=4846
+callback_harvest_attempt_count=12108
+```
+
+Interpretation:
+
+0.2.70 removes the measurable realtime-path overhead from 0.2.68/0.2.69 and is better than those experiments, but this run is still worse than the best 0.2.67 run. The remaining instability is probably run-to-run timing/jitter in the live harvest path rather than only a fixed algorithmic regression.
+
+### 0.2.71 IR event gate bypass experiment
+
+This build keeps the 0.2.70 runtime behavior but sets `kDigiLiveRequireIREventBeforeSync = 0`. The worker still polls and clears the OHCI IR event bit for diagnostics, but a missed event no longer prevents a DMA sync/descriptor harvest. The goal is to test whether missed/coalesced event bits are causing late RX-ring reads and catch-up skips.
+
+### 0.2.97 fast init and full-sync baseline
+
+This build skips the slow debug-only async Config ROM/register probe and the old startup duplex probe when the known Digi 003 path is enabled (`ProbeFastKnownDigi003InitEnabled = 1`). The driver now reaches Stage 20 immediately in local tests instead of spending tens of seconds in Stage 13. The live audio start still performs the required Digi begin transactions.
+
+Runtime remains the best long-run baseline shape: 2048 IR descriptors, full descriptor sync after harvested packets, 65536-frame audio ring, 49152-frame diagnostic prebuffer, callback harvest enabled, and worker low-water at 49152 frames.
+
+```text
+Captures/coreaudio-digi003-test-0.2.97-fastinit-fullsync-10s.wav
+after_1s_repeated_frames=0
+last_5s_repeated_frames=0
+
+Captures/coreaudio-digi003-test-0.2.97-fastinit-fullsync-30s.wav
+total_repeated_frames=55879
+after_1s_repeated_frames=50304
+last_10s_repeated_frames=31040
+last_5s_repeated_frames=20160
+```
+
+Interpretation:
+
+Fast init is a clear win for iteration speed and does not break the 10-second clean-after-start behavior. The 30-second run still shows late underrun/repeat bursts, so the remaining issue is not startup probing; it is still live RX continuity and the catch-up path.
+
+### 0.2.98 catch-up threshold experiment
+
+This build keeps the 0.2.97 fast-init/full-sync baseline and raises `ProbeDigiLiveIRCommandPtrCatchUpMinPackets` from 8 to 32. The goal is to avoid treating short command-pointer/read-index races as packet loss.
+
+```text
+Captures/coreaudio-digi003-test-0.2.98-catchup32-10s.wav
+after_1s_repeated_frames=0
+last_5s_repeated_frames=0
+
+Captures/coreaudio-digi003-test-0.2.98-catchup32-30s.wav
+total_repeated_frames=63576
+after_1s_repeated_frames=57029
+last_10s_repeated_frames=33285
+last_5s_repeated_frames=14661
+rx_dbc_lost_count=27331
+empty_catch_up_skipped_packets=27224
+```
+
+Interpretation:
+
+This is mixed. The 10-second behavior remains clean after startup, and the final 5-second window improves compared with 0.2.97, but the total/after-1s/last-10s repeated-frame counts are worse. DBC/cycle loss and skipped packets dropped, which suggests the catch-up threshold is connected to the right failure mode, but the threshold alone is not a complete stability fix.
+
+Rejected experiments:
+
+- `0.2.94`: 3072 IR descriptors with corrected memory layout loaded and linked, but 30-second audio was worse than the 2048-descriptor baseline.
+- `0.2.95`/`0.2.96`: selective descriptor/data range sync experiments rearmed only the first RX ring pass and then starved the stream. Keep full descriptor sync for now.
+
+## Local Automation Notes
+
+A narrow local sudoers rule is installed at `/etc/sudoers.d/firewire-ohci-probe` so Codex can continue DriverKit upgrade loops without repeated password prompts. It permits only:
+
+```text
+/usr/sbin/installer -pkg /Users/axelheckert/Documents/Codex/2026-05-15/files-mentioned-by-the-user-003/FireWireOHCIProbe/Packages/FireWireOHCIProbeLoader.pkg -target /
+/usr/local/sbin/firewire-ohci-probe-kill-old <pid>
+```
+
+The helper validates that the PID belongs to `com.axelheckert.driver.FireWireOHCIProbe` before sending `kill -9`. The previous malformed `/etc/sudoers` line was removed, with a backup saved as `/etc/sudoers.codex-backup-20260517130552`.
+
+New diagnostics:
+
+```text
+ProbeAudioRuntimeCaptureActive
+ProbeAudioRuntimeInputCallbackLastPreHarvestFillFrames
+ProbeAudioRuntimeInputCallbackLastPostHarvestFillFrames
+ProbeAudioRuntimeInputCallbackLastPostConsumeFillFrames
+ProbeAudioRuntimeInputCallbackMinPreHarvestFillFrames
+ProbeAudioRuntimeInputCallbackMinPostConsumeFillFrames
+ProbeAudioRuntimeInputCallbackLowFillCount
+ProbeAudioRuntimeRingActiveRepeatedFrames
+ProbeAudioRuntimeRingActiveUnderrunFrames
+ProbeAudioRuntimeRingActiveOverrunFrames
+ProbeAudioRuntimeRefreshWorkerActiveCatchUpDelayCount
+ProbeAudioRuntimeRefreshWorkerActiveCatchUpNoSleepCount
+```
 
 ## Stream Format References
 
@@ -392,7 +639,8 @@ monitor source stride                = 8
 
 ## Next Work
 
-1. Tune 0.2.63 catch-up/backpressure to reduce the remaining small underrun/repeat count.
-2. Reduce RX DBC/cycle lost counts now that harvest throughput is near real-time.
-3. Add Digi "double-oh-three" playback encoding before enabling non-silent output.
-4. Add MIDI/control-surface and mixer/control support after audio input stability improves.
+1. Replace the raw callback harvest-depth experiment with timing-aware harvest/backpressure so the ring stays above the callback request during active capture.
+2. Distinguish active-capture underrun from post-capture ring fill in diagnostics.
+3. Reduce RX DBC/cycle lost counts now that harvest throughput is near real-time.
+4. Add Digi "double-oh-three" playback encoding before enabling non-silent output.
+5. Add MIDI/control-surface and mixer/control support after audio input stability improves.

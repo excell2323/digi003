@@ -235,7 +235,7 @@ constexpr uint32_t kDigiLiveReceiveIRQInterval = 8;
 constexpr uint32_t kDigiLiveRequireIREventBeforeSync = 1;
 constexpr uint32_t kDigiLiveIREventGateMissBypassCount = 4;
 constexpr uint32_t kDigiLiveIRCommandPtrCatchUpEnabled = 1;
-constexpr uint32_t kDigiLiveIRCommandPtrCatchUpMinPackets = 8;
+constexpr uint32_t kDigiLiveIRCommandPtrCatchUpMinPackets = 32;
 constexpr uint32_t kDigiLiveIRCommandPtrCatchUpScanEnabled = 1;
 constexpr uint32_t kDigiLiveIRCommandPtrCatchUpScanMaxPackets = 256;
 constexpr uint32_t kDigiLiveSingleIRDescriptorDataSize =
@@ -263,21 +263,23 @@ constexpr uint32_t kDigi00xDuplexIRCaptureSampleRate = 44100;
 constexpr uint32_t kDigi00xDuplexAM824AudioLabel = 0x40;
 constexpr uint32_t kAudioDeviceZeroTimestampPeriod = 128;
 constexpr uint32_t kAudioInputBufferFrameCount = 8192;
-constexpr uint32_t kAudioRingBufferFrameCount = 16384;
+constexpr uint32_t kAudioRingBufferFrameCount = 65536;
 constexpr uint32_t kAudioRefreshStopWaitLoopLimit = 1000;
 constexpr uint32_t kAudioDirectInputBufferEnabled = 0;
-constexpr uint32_t kAudioCallbackHarvestEnabled = 0;
-constexpr uint32_t kAudioCallbackHarvestLowWaterFrames = 2048;
+constexpr uint32_t kAudioCallbackHarvestEnabled = 1;
+constexpr uint32_t kAudioCallbackHarvestLowWaterFrames = 16384;
 constexpr uint32_t kAudioCallbackHarvestMaxAttempts = 4;
-constexpr uint32_t kDigiLiveHarvestMaxDescriptorsPerPass = 128;
+constexpr uint32_t kDigiLiveIREventLowWaterBypassEnabled = 0;
+constexpr uint32_t kDigiLiveIREventLowWaterBypassFrames = 16384;
+constexpr uint32_t kDigiLiveHarvestMaxDescriptorsPerPass = 512;
 constexpr uint32_t kDigiLiveHarvestSleepMilliseconds = 1;
 constexpr uint32_t kDigiLiveIdleSleepMilliseconds = 1;
-constexpr uint32_t kDigiLiveWorkerPublishInterval = 32;
+constexpr uint32_t kDigiLiveWorkerPublishInterval = 512;
 constexpr uint32_t kDigiLiveIREventPollingEnabled = 1;
-constexpr uint32_t kDigiLiveWorkerLowWaterFrames = 0;
-constexpr uint32_t kDigiLivePrebufferTargetFrames = 8192;
-constexpr uint32_t kDigiLivePrebufferAttemptCount = 300;
-constexpr uint32_t kDigiLiveSequenceReplayEnabled = 1;
+constexpr uint32_t kDigiLiveWorkerLowWaterFrames = 49152;
+constexpr uint32_t kDigiLivePrebufferTargetFrames = 49152;
+constexpr uint32_t kDigiLivePrebufferAttemptCount = 2000;
+constexpr uint32_t kDigiLiveSequenceReplayEnabled = 0;
 constexpr uint32_t kDigiLiveSequenceReplayPeriodPackets = 80;
 constexpr uint32_t kDigiLiveSequenceReplayRequireContinuity = 0;
 constexpr uint32_t kDigiLiveSequenceReplayMovingEnabled = 0;
@@ -299,6 +301,7 @@ constexpr uint32_t kDigi00xWritePlanEnabled = 0;
 constexpr uint32_t kDigi00xNoopWriteEnabled = 0;
 constexpr uint32_t kDigi00xStateWriteEnabled = 0;
 constexpr uint32_t kDigi00xStateSequenceEnabled = 0;
+constexpr uint32_t kFastKnownDigi003InitEnabled = 1;
 
 constexpr uint32_t kOhciMaxATRequestRetries = 0xf;
 constexpr uint32_t kOhciMaxATResponseRetries = 0x2;
@@ -1507,6 +1510,14 @@ PublishAudioRuntimeDiagnostics()
     AddNumberProperty(properties,
                       "ProbeDigiLiveHarvestMaxDescriptorsPerPass",
                       kDigiLiveHarvestMaxDescriptorsPerPass,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveIREventLowWaterBypassEnabled",
+                      kDigiLiveIREventLowWaterBypassEnabled,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveIREventLowWaterBypassFrames",
+                      kDigiLiveIREventLowWaterBypassFrames,
                       32);
     AddNumberProperty(properties,
                       "ProbeDigiLiveHarvestSleepMilliseconds",
@@ -6219,7 +6230,11 @@ HarvestDigiLiveIsoStream()
         } else {
             gDigiLiveIREventMissCount++;
             gDigiLiveIREventConsecutiveMissCount++;
+            bool lowWaterBypass =
+                kDigiLiveIREventLowWaterBypassEnabled != 0 &&
+                gAudioRingCurrentFillFrames < kDigiLiveIREventLowWaterBypassFrames;
             if (kDigiLiveRequireIREventBeforeSync != 0 &&
+                !lowWaterBypass &&
                 gDigiLiveLastHarvestPackets < kDigiLiveHarvestMaxDescriptorsPerPass &&
                 gDigiLiveIREventConsecutiveMissCount < kDigiLiveIREventGateMissBypassCount) {
                 gDigiLiveIREventGateSkipCount++;
@@ -6232,6 +6247,12 @@ HarvestDigiLiveIsoStream()
             }
         }
     }
+
+    uint64_t descriptorSyncSize =
+        kDigi00xDuplexIRDescriptorOffset +
+        kDigi00xDuplexIRDescriptorCount *
+            kDigi00xDuplexIRDescriptorsPerPacketStorage *
+            sizeof(OHCIAsyncDescriptor);
 
     gDigiLiveDrainAttemptCount++;
     gDigiLiveHarvestAttemptCount++;
@@ -6402,11 +6423,6 @@ HarvestDigiLiveIsoStream()
         if (gDigiLiveSequenceReplayActive != 0) {
             (void)RefreshDigiLiveMovingSequenceReplay();
         }
-        uint64_t descriptorSyncSize =
-            kDigi00xDuplexIRDescriptorOffset +
-            kDigi00xDuplexIRDescriptorCount *
-                kDigi00xDuplexIRDescriptorsPerPacketStorage *
-                sizeof(OHCIAsyncDescriptor);
         gDigiLiveSyncForDeviceRet =
             ReturnCodeToProperty(SyncDMABufferForDevice(&gDigiLiveBuffer, descriptorSyncSize));
         uint64_t irControlSet = OhciIsoRcvContextControlSetOffset(kDigi00xDuplexContextIndex);
@@ -7679,7 +7695,8 @@ StartAudioRefreshWorker()
                     sleepMilliseconds = 0;
                     gAudioRefreshWorkerBacklogNoSleepCount++;
                 }
-                if (kDigiLiveWorkerLowWaterFrames != 0 &&
+                if (ret == kIOReturnSuccess &&
+                    kDigiLiveWorkerLowWaterFrames != 0 &&
                     gAudioRingCurrentFillFrames < kDigiLiveWorkerLowWaterFrames) {
                     sleepMilliseconds = 0;
                     gAudioRefreshWorkerLowWaterNoSleepCount++;
@@ -8146,12 +8163,22 @@ IMPL(FireWireOHCIProbe, Start)
                               secondWaitIntEvent)) {
             IOSleep(kPostSelfIDSettleMilliseconds);
             PublishStartStage(13, selectedNodeID);
-            RunAsyncConfigROMRead(pciDevice, memoryIndex, selectedNodeID, &asyncRead, &digiDuplex);
-            gDigiDestinationID = asyncRead.destinationID;
+            if (kFastKnownDigi003InitEnabled != 0) {
+                asyncRead.attempted = 0;
+                asyncRead.localNodeID = selectedNodeID & 0xffffu;
+                asyncRead.destinationID = asyncRead.localNodeID & 0xffc0u;
+                asyncRead.ready = 1;
+                gDigiDestinationID = asyncRead.destinationID;
+            } else {
+                RunAsyncConfigROMRead(pciDevice, memoryIndex, selectedNodeID, &asyncRead, &digiDuplex);
+                gDigiDestinationID = asyncRead.destinationID;
+            }
             PublishStartStage(14, asyncRead.ready);
         }
         PublishStartStage(15, 0);
-        RunIsoContextProbe(pciDevice, memoryIndex, &isoTest);
+        if (kFastKnownDigi003InitEnabled == 0) {
+            RunIsoContextProbe(pciDevice, memoryIndex, &isoTest);
+        }
         PublishStartStage(16, isoTest.attempted);
     }
 
@@ -8239,6 +8266,7 @@ IMPL(FireWireOHCIProbe, Start)
         AddNumberProperty(diagnostics, "ProbeBAR0Size", barSize, 64);
         AddNumberProperty(diagnostics, "ProbeBAR0Type", barType, 8);
         AddNumberProperty(diagnostics, "ProbeMemoryReadSucceeded", memoryReadSucceeded ? 1 : 0, 8);
+        AddNumberProperty(diagnostics, "ProbeFastKnownDigi003InitEnabled", kFastKnownDigi003InitEnabled, 32);
         AddNumberProperty(diagnostics, "ProbeAudioConfigureRet", ReturnCodeToProperty(audioConfigureRet), 32);
         AddNumberProperty(diagnostics, "ProbeAudioDeviceCreateRet", gAudioDeviceCreateRet, 32);
         AddNumberProperty(diagnostics, "ProbeAudioStreamCreateRet", gAudioStreamCreateRet, 32);
