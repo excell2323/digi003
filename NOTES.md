@@ -8,7 +8,7 @@ Current active local version:
 
 - Driver: `com.axelheckert.driver.FireWireOHCIProbe`
 - Host app: `com.axelheckert.FireWireOHCIProbeLoader`
-- Version: `0.2.139/339`
+- Version: `0.2.140/340`
 - Team ID used locally: `7H3ND356AV`
 - Controller: `pci11c1,5901` / IEEE 1394 Open HCI
 
@@ -1440,6 +1440,81 @@ throughput or FireWire packet cadence. The new issue is latency: with the old
 49152-frame prebuffer and 65536-frame ring, the producer now runs with too much
 headroom and hits ring overrun instead of underrun. The next experiment should
 lower the prebuffer/low-water targets while keeping the uncached DMA mapping.
+
+`0.2.140` keeps the uncached live DMA mapping and reduces the audio buffering
+targets:
+
+```text
+ProbeDigiLivePrebufferTargetFrames=8192
+ProbeDigiLiveWorkerLowWaterFrames=8192
+kAudioCallbackHarvestLowWaterFrames=8192
+```
+
+This lowers the start prebuffer from about 1.1 seconds to about 186 ms at
+44.1 kHz while keeping the large 65536-frame ring as emergency headroom.
+
+10-second test:
+
+```text
+Captures/coreaudio-digi003-test-0.2.140-lowlatency-10s.wav
+after_1s_repeated_frames=0
+after_2s_repeated_frames=0
+last_5s_repeated_frames=0
+ProbeAudioRuntimeRingUnderrunFrames=0
+ProbeAudioRuntimeRingRepeatedFrames=0
+ProbeAudioRuntimeRingOverrunFrames=0
+ProbeAudioRuntimeRingMaxFillFrames=8751
+ProbeDigiLiveIREmptyCatchUpCount=0
+ProbeDigiLiveDrainBusyCount=0
+```
+
+30-second test:
+
+```text
+Captures/coreaudio-digi003-test-0.2.140-lowlatency-30s.wav
+repeated_frames=963
+after_1s_repeated_frames=0
+after_2s_repeated_frames=0
+last_10s_repeated_frames=0
+last_5s_repeated_frames=0
+ProbeAudioRuntimeRingUnderrunFrames=0
+ProbeAudioRuntimeRingRepeatedFrames=0
+ProbeAudioRuntimeRingOverrunFrames=0
+ProbeAudioRuntimeRingMaxFillFrames=31112
+ProbeDigiLiveRxDBCLostCount=5
+ProbeDigiLiveRxCycleLostCount=0
+ProbeDigiLiveIREmptyCatchUpCount=0
+ProbeDigiLiveEmptyPollCount=0
+```
+
+60-second test:
+
+```text
+Captures/coreaudio-digi003-test-0.2.140-lowlatency-60s.wav
+repeated_frames=1083
+after_1s_repeated_frames=0
+after_2s_repeated_frames=0
+last_30s_repeated_frames=0
+last_10s_repeated_frames=0
+last_5s_repeated_frames=0
+ProbeAudioRuntimeRingUnderrunFrames=0
+ProbeAudioRuntimeRingRepeatedFrames=0
+ProbeAudioRuntimeRingOverrunFrames=0
+ProbeAudioRuntimeRingMaxFillFrames=31274
+ProbeDigiLiveRxDBCLostCount=8
+ProbeDigiLiveRxCycleLostCount=0
+ProbeDigiLiveIREmptyCatchUpCount=0
+ProbeDigiLiveEmptyPollCount=0
+ProbeDigiLiveSequenceReplayMovingBadCommandPtrCount=0
+```
+
+Interpretation:
+
+`0.2.140` is the new best input checkpoint. The 60-second run stays clean after
+startup, does not underrun, does not overrun, and keeps the live moving replay
+dry-run stable. The remaining transport work is to turn the output path from
+dry-run into a safe staged/pre-start descriptor strategy, then add the Digi 003
+output encoding and later the control/mixer/fader surfaces.
 
 ## Local Automation Notes
 
