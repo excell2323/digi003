@@ -1,0 +1,28 @@
+#ifndef FireWireOHCIProbe_h
+#define FireWireOHCIProbe_h
+
+#include <Availability.h>
+#include <AudioDriverKit/IOUserAudioDriver.iig>
+#include <DriverKit/IOService.iig>
+#include <PCIDriverKit/IOPCIDevice.iig>
+
+class FireWireOHCIProbe: public IOUserAudioDriver
+{
+public:
+    virtual kern_return_t
+    Start(IOService * provider) override;
+
+    virtual kern_return_t
+    Stop(IOService * provider) override;
+
+    virtual kern_return_t
+    StartDevice(IOUserAudioObjectID in_object_id,
+                IOUserAudioStartStopFlags in_flags) override;
+
+    virtual kern_return_t
+    StopDevice(IOUserAudioObjectID in_object_id,
+               IOUserAudioStartStopFlags in_flags) override;
+
+};
+
+#endif

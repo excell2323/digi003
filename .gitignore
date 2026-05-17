@@ -1,0 +1,31 @@
+.DS_Store
+
+# Local build products
+/build/
+/Packages/
+/Tools/bin/
+*.o
+*.dext/
+*.app/
+*.pkg
+
+# Captures and generated audio/debug dumps
+/Captures/
+*.wav
+*.raw
+*.aiff
+*.caf
+
+# Local signing/provisioning material
+/certs/
+/Profiles/
+*.cer
+*.mobileconfig
+*.provisionprofile
+*.developerprofile
+
+# Xcode/local state
+DerivedData/
+*.xcuserstate
+xcuserdata/
+

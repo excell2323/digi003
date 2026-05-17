@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleExecutable</key>
+    <string>FireWireOHCIProbe</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.axelheckert.driver.FireWireOHCIProbe</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>FireWireOHCIProbe</string>
+    <key>CFBundlePackageType</key>
+    <string>DEXT</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.2.48</string>
+    <key>CFBundleSupportedPlatforms</key>
+    <array>
+        <string>DriverKit</string>
+    </array>
+	<key>CFBundleVersion</key>
+	<string>248</string>
+    <key>IOKitPersonalities</key>
+    <dict>
+        <key>FireWireOHCIProbe</key>
+        <dict>
+            <key>CFBundleIdentifier</key>
+            <string>com.axelheckert.driver.FireWireOHCIProbe</string>
+            <key>CFBundleIdentifierKernel</key>
+            <string>com.apple.kpi.iokit</string>
+            <key>IOClass</key>
+            <string>IOUserService</string>
+            <key>IOMatchCategory</key>
+            <string>com.axelheckert.driver.FireWireOHCIProbe</string>
+            <key>IOPCIPrimaryMatch</key>
+            <string>0x590111c1</string>
+            <key>IOPCITunnelCompatible</key>
+            <true/>
+            <key>IOProviderClass</key>
+            <string>IOPCIDevice</string>
+            <key>IOUserClass</key>
+            <string>FireWireOHCIProbe</string>
+            <key>IOUserAudioDriverUserClientProperties</key>
+            <dict>
+                <key>IOClass</key>
+                <string>IOUserUserClient</string>
+                <key>IOUserClass</key>
+                <string>IOUserAudioDriverUserClient</string>
+            </dict>
+            <key>IOUserServerName</key>
+            <string>com.axelheckert.driver.FireWireOHCIProbe</string>
+        </dict>
+    </dict>
+    <key>OSBundleUsageDescription</key>
+    <string>Probe the FireWire OHCI PCI controller used by the Apple Thunderbolt-to-FireWire adapter.</string>
+    <key>OSMinimumDriverKitVersion</key>
+    <string>25.4</string>
+</dict>
+</plist>
