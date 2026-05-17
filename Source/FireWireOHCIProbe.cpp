@@ -301,9 +301,11 @@ constexpr uint32_t kDigiLiveSequenceReplayMovingUseCadencePhase = 1;
 constexpr uint32_t kDigiLiveSequenceReplayMovingLearnCadenceFromQueue = 1;
 constexpr uint32_t kDigiLiveSequenceReplayMovingAllowCachedCadencePhase = 1;
 constexpr uint32_t kDigiLiveSequenceReplayMovingRequireCadenceMismatchZero = 0;
+constexpr uint32_t kDigiLiveSequenceReplayMovingLiveWriteGuardEnabled = 1;
+constexpr uint32_t kDigiLiveSequenceReplayMovingGuardMinStartDistancePackets = 4096;
 constexpr uint32_t kDigiLiveSequenceReplayMovingQueuePackets = 512;
 constexpr uint32_t kDigiLiveSequenceReplayMovingUpdatePackets = 80;
-constexpr uint32_t kDigiLiveSequenceReplayMovingLeadPackets = 512;
+constexpr uint32_t kDigiLiveSequenceReplayMovingLeadPackets = 4096;
 constexpr uint32_t kDigiLiveSequenceReplayPeriodDataBlocks44100 = 441;
 constexpr uint32_t kDigiLiveRxCadencePeriodPackets = 80;
 constexpr uint32_t kDigiLiveStateStopped = 0;
@@ -1254,6 +1256,10 @@ uint64_t gDigiLiveSequenceReplayMovingCadenceLearnCount = 0;
 uint64_t gDigiLiveSequenceReplayMovingCadenceLearnPacketCount = 0;
 uint64_t gDigiLiveSequenceReplayMovingCadenceLearnRejectCount = 0;
 uint64_t gDigiLiveSequenceReplayMovingCadenceCachedUseCount = 0;
+uint64_t gDigiLiveSequenceReplayMovingGuardEligibleCount = 0;
+uint64_t gDigiLiveSequenceReplayMovingGuardRejectCount = 0;
+uint64_t gDigiLiveSequenceReplayMovingGuardDryRunWouldWriteCount = 0;
+uint64_t gDigiLiveSequenceReplayMovingGuardDryRunWouldRejectCount = 0;
 uint32_t gDigiLiveSequenceReplayMovingLastCurrentPacketIndex = 0xffffffff;
 uint32_t gDigiLiveSequenceReplayMovingLastUpdateStartIndex = 0xffffffff;
 uint32_t gDigiLiveSequenceReplayMovingLastUpdatePackets = 0;
@@ -1264,6 +1270,10 @@ uint32_t gDigiLiveSequenceReplayMovingLastCadenceMismatchCount = 0xffffffff;
 uint32_t gDigiLiveSequenceReplayMovingLastCadenceSource = 0;
 uint32_t gDigiLiveSequenceReplayMovingCachedCadencePhase = 0xffffffff;
 uint32_t gDigiLiveSequenceReplayMovingCachedCadenceMismatchCount = 0xffffffff;
+uint32_t gDigiLiveSequenceReplayMovingLastStartDistancePackets = 0xffffffff;
+uint32_t gDigiLiveSequenceReplayMovingLastEndDistancePackets = 0xffffffff;
+uint32_t gDigiLiveSequenceReplayMovingLastWindowWrapsHardware = 0;
+uint32_t gDigiLiveSequenceReplayMovingLastGuardWouldWrite = 0;
 uint32_t gDigiLiveSequenceReplayMovingLastStartDBC = 0;
 uint32_t gDigiLiveSequenceReplayMovingLastEndDBC = 0;
 uint32_t gDigiLiveSequenceReplayMovingLastSyncRet = static_cast<uint32_t>(kIOReturnNotReady);
@@ -2221,6 +2231,14 @@ PublishAudioRuntimeDiagnostics()
                       kDigiLiveSequenceReplayMovingRequireCadenceMismatchZero,
                       32);
     AddNumberProperty(properties,
+                      "ProbeDigiLiveSequenceReplayMovingLiveWriteGuardEnabled",
+                      kDigiLiveSequenceReplayMovingLiveWriteGuardEnabled,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveSequenceReplayMovingGuardMinStartDistancePackets",
+                      kDigiLiveSequenceReplayMovingGuardMinStartDistancePackets,
+                      32);
+    AddNumberProperty(properties,
                       "ProbeDigiLiveSequenceReplayMovingQueuePackets",
                       kDigiLiveSequenceReplayMovingQueuePackets,
                       32);
@@ -2333,6 +2351,22 @@ PublishAudioRuntimeDiagnostics()
                       gDigiLiveSequenceReplayMovingCadenceCachedUseCount,
                       64);
     AddNumberProperty(properties,
+                      "ProbeDigiLiveSequenceReplayMovingGuardEligibleCount",
+                      gDigiLiveSequenceReplayMovingGuardEligibleCount,
+                      64);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveSequenceReplayMovingGuardRejectCount",
+                      gDigiLiveSequenceReplayMovingGuardRejectCount,
+                      64);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveSequenceReplayMovingGuardDryRunWouldWriteCount",
+                      gDigiLiveSequenceReplayMovingGuardDryRunWouldWriteCount,
+                      64);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveSequenceReplayMovingGuardDryRunWouldRejectCount",
+                      gDigiLiveSequenceReplayMovingGuardDryRunWouldRejectCount,
+                      64);
+    AddNumberProperty(properties,
                       "ProbeDigiLiveSequenceReplayMovingLastCurrentPacketIndex",
                       gDigiLiveSequenceReplayMovingLastCurrentPacketIndex,
                       32);
@@ -2371,6 +2405,22 @@ PublishAudioRuntimeDiagnostics()
     AddNumberProperty(properties,
                       "ProbeDigiLiveSequenceReplayMovingCachedCadenceMismatchCount",
                       gDigiLiveSequenceReplayMovingCachedCadenceMismatchCount,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveSequenceReplayMovingLastStartDistancePackets",
+                      gDigiLiveSequenceReplayMovingLastStartDistancePackets,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveSequenceReplayMovingLastEndDistancePackets",
+                      gDigiLiveSequenceReplayMovingLastEndDistancePackets,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveSequenceReplayMovingLastWindowWrapsHardware",
+                      gDigiLiveSequenceReplayMovingLastWindowWrapsHardware,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveSequenceReplayMovingLastGuardWouldWrite",
+                      gDigiLiveSequenceReplayMovingLastGuardWouldWrite,
                       32);
     AddNumberProperty(properties,
                       "ProbeDigiLiveSequenceReplayMovingLastStartDBC",
@@ -4896,6 +4946,10 @@ ResetDigiLiveSequenceReplayState()
     gDigiLiveSequenceReplayMovingCadenceLearnPacketCount = 0;
     gDigiLiveSequenceReplayMovingCadenceLearnRejectCount = 0;
     gDigiLiveSequenceReplayMovingCadenceCachedUseCount = 0;
+    gDigiLiveSequenceReplayMovingGuardEligibleCount = 0;
+    gDigiLiveSequenceReplayMovingGuardRejectCount = 0;
+    gDigiLiveSequenceReplayMovingGuardDryRunWouldWriteCount = 0;
+    gDigiLiveSequenceReplayMovingGuardDryRunWouldRejectCount = 0;
     gDigiLiveSequenceReplayMovingLastCurrentPacketIndex = 0xffffffff;
     gDigiLiveSequenceReplayMovingLastUpdateStartIndex = 0xffffffff;
     gDigiLiveSequenceReplayMovingLastUpdatePackets = 0;
@@ -4906,6 +4960,10 @@ ResetDigiLiveSequenceReplayState()
     gDigiLiveSequenceReplayMovingLastCadenceSource = 0;
     gDigiLiveSequenceReplayMovingCachedCadencePhase = 0xffffffff;
     gDigiLiveSequenceReplayMovingCachedCadenceMismatchCount = 0xffffffff;
+    gDigiLiveSequenceReplayMovingLastStartDistancePackets = 0xffffffff;
+    gDigiLiveSequenceReplayMovingLastEndDistancePackets = 0xffffffff;
+    gDigiLiveSequenceReplayMovingLastWindowWrapsHardware = 0;
+    gDigiLiveSequenceReplayMovingLastGuardWouldWrite = 0;
     gDigiLiveSequenceReplayMovingLastStartDBC = 0;
     gDigiLiveSequenceReplayMovingLastEndDBC = 0;
     gDigiLiveSequenceReplayMovingLastSyncRet = ReturnCodeToProperty(kIOReturnNotReady);
@@ -5615,6 +5673,41 @@ RefreshDigiLiveMovingSequenceReplay()
     uint32_t updateStart =
         (currentPacketIndex + kDigiLiveSequenceReplayMovingLeadPackets) %
         kDigi00xDuplexITPacketCount;
+    uint32_t startDistance =
+        (updateStart + kDigi00xDuplexITPacketCount - currentPacketIndex) %
+        kDigi00xDuplexITPacketCount;
+    uint32_t endDistance = startDistance + kDigiLiveSequenceReplayMovingUpdatePackets - 1;
+    bool windowWrapsHardware = endDistance >= kDigi00xDuplexITPacketCount;
+    bool guardWouldWrite =
+        kDigiLiveSequenceReplayMovingLiveWriteGuardEnabled == 0 ||
+        (!windowWrapsHardware &&
+         startDistance >= kDigiLiveSequenceReplayMovingGuardMinStartDistancePackets);
+    gDigiLiveSequenceReplayMovingLastStartDistancePackets = startDistance;
+    gDigiLiveSequenceReplayMovingLastEndDistancePackets =
+        windowWrapsHardware ? (endDistance % kDigi00xDuplexITPacketCount) : endDistance;
+    gDigiLiveSequenceReplayMovingLastWindowWrapsHardware =
+        windowWrapsHardware ? 1u : 0u;
+    gDigiLiveSequenceReplayMovingLastGuardWouldWrite = guardWouldWrite ? 1u : 0u;
+    if (kDigiLiveSequenceReplayMovingLiveWriteGuardEnabled != 0) {
+        if (guardWouldWrite) {
+            gDigiLiveSequenceReplayMovingGuardEligibleCount++;
+        } else {
+            gDigiLiveSequenceReplayMovingGuardRejectCount++;
+        }
+        if (kDigiLiveSequenceReplayMovingDryRunEnabled != 0) {
+            if (guardWouldWrite) {
+                gDigiLiveSequenceReplayMovingGuardDryRunWouldWriteCount++;
+            } else {
+                gDigiLiveSequenceReplayMovingGuardDryRunWouldRejectCount++;
+            }
+        } else if (!guardWouldWrite) {
+            gDigiLiveSequenceReplayMovingLastUpdatePackets = 0;
+            gDigiLiveSequenceReplayMovingLastSyncRet =
+                ReturnCodeToProperty(kIOReturnNotReady);
+            return kIOReturnNotReady;
+        }
+    }
+
     uint32_t dataBlockCounter = DigiLiveTransmitDBCForPacket(itHeaderStorage, updateStart);
     gDigiLiveSequenceReplayMovingLastStartDBC = dataBlockCounter;
 

@@ -8,7 +8,7 @@ Current active local version:
 
 - Driver: `com.axelheckert.driver.FireWireOHCIProbe`
 - Host app: `com.axelheckert.FireWireOHCIProbeLoader`
-- Version: `0.2.135/335`
+- Version: `0.2.136/336`
 - Team ID used locally: `7H3ND356AV`
 - Controller: `pci11c1,5901` / IEEE 1394 Open HCI
 
@@ -1290,6 +1290,48 @@ ProbeDigiLiveSequenceReplayMovingDryRunPacketCount=56640
 ProbeDigiLiveSequenceReplayMovingCadencePhaseUseCount=708
 ProbeDigiLiveSequenceReplayMovingBadTotalCount=0
 ProbeDigiLiveSequenceReplayMovingBadCommandPtrCount=0
+```
+
+`0.2.136` keeps dry-run mode but raises the moving replay update lead from 512
+to 4096 packets and adds a live-write guard diagnostic. The guard records the
+distance from the current IT command pointer to the planned update window, rejects
+windows that would wrap over the hardware pointer, and in dry-run publishes
+whether a future live write would have been allowed.
+
+```text
+Captures/coreaudio-digi003-test-0.2.136-guarded-dryrun-10s.wav
+after_1s_repeated_frames=0
+after_2s_repeated_frames=0
+last_5s_repeated_frames=0
+ProbeAudioRuntimeRingUnderrunFrames=0
+ProbeDigiLiveSequenceReplayMovingLeadPackets=4096
+ProbeDigiLiveSequenceReplayMovingDryRunSuccessCount=674
+ProbeDigiLiveSequenceReplayMovingGuardEligibleCount=674
+ProbeDigiLiveSequenceReplayMovingGuardRejectCount=0
+ProbeDigiLiveSequenceReplayMovingGuardDryRunWouldWriteCount=674
+ProbeDigiLiveSequenceReplayMovingGuardDryRunWouldRejectCount=0
+ProbeDigiLiveSequenceReplayMovingLastStartDistancePackets=4096
+ProbeDigiLiveSequenceReplayMovingLastEndDistancePackets=4175
+ProbeDigiLiveSequenceReplayMovingLastGuardWouldWrite=1
+ProbeDigiLiveSequenceReplayMovingBadCommandPtrCount=0
+```
+
+The 30-second follow-up still shows the known long-run input harvest starvation,
+but the guard remains consistently eligible and command-pointer-stable:
+
+```text
+Captures/coreaudio-digi003-test-0.2.136-guarded-dryrun-30s.wav
+repeated_frames=68372
+after_1s_repeated_frames=63397
+last_10s_repeated_frames=39721
+last_5s_repeated_frames=20517
+ProbeAudioRuntimeRingUnderrunFrames=68511
+ProbeDigiLiveSequenceReplayMovingDryRunSuccessCount=1790
+ProbeDigiLiveSequenceReplayMovingGuardEligibleCount=1790
+ProbeDigiLiveSequenceReplayMovingGuardRejectCount=0
+ProbeDigiLiveSequenceReplayMovingBadCommandPtrCount=0
+ProbeDigiLiveSequenceReplayMovingLastStartDistancePackets=4096
+ProbeDigiLiveSequenceReplayMovingLastEndDistancePackets=4175
 ```
 
 ## Local Automation Notes
