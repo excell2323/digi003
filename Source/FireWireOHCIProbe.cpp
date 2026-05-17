@@ -240,12 +240,34 @@ constexpr uint32_t kDigiLiveControlKindChannelFaderTouch = 4;
 constexpr uint32_t kDigiLiveControlKindChannelFaderMove = 5;
 constexpr uint32_t kDigiLiveControlKindStop = 6;
 constexpr uint32_t kDigiLiveControlKindPlay = 7;
+constexpr uint32_t kDigiLiveControlKindTransportRTZ = 8;
+constexpr uint32_t kDigiLiveControlKindTransportRewind = 9;
+constexpr uint32_t kDigiLiveControlKindTransportFastForward = 10;
+constexpr uint32_t kDigiLiveControlKindTransportRecord = 11;
+constexpr uint32_t kDigiLiveControlKindArrowLeft = 12;
+constexpr uint32_t kDigiLiveControlKindArrowRight = 13;
+constexpr uint32_t kDigiLiveControlKindArrowUp = 14;
+constexpr uint32_t kDigiLiveControlKindArrowDown = 15;
+constexpr uint32_t kDigiLiveControlKindJogWheel = 16;
+constexpr uint32_t kDigiLiveControlKindShuttle = 17;
 constexpr uint32_t kDigiLiveControlNoteChannelSelect = 0x00;
 constexpr uint32_t kDigiLiveControlNoteChannelSolo = 0x01;
 constexpr uint32_t kDigiLiveControlNoteChannelMute = 0x02;
 constexpr uint32_t kDigiLiveControlNoteChannelFaderTouch = 0x03;
+constexpr uint32_t kDigiLiveControlNoteArrowLeft = 0x05;
+constexpr uint32_t kDigiLiveControlNoteArrowRight = 0x06;
+constexpr uint32_t kDigiLiveControlNoteArrowUp = 0x07;
+constexpr uint32_t kDigiLiveControlNoteArrowDown = 0x08;
+constexpr uint32_t kDigiLiveControlNoteTransportRTZ = 0x06;
+constexpr uint32_t kDigiLiveControlNoteTransportRewind = 0x07;
+constexpr uint32_t kDigiLiveControlNoteTransportFastForward = 0x08;
 constexpr uint32_t kDigiLiveControlNoteStop = 0x09;
 constexpr uint32_t kDigiLiveControlNotePlay = 0x0a;
+constexpr uint32_t kDigiLiveControlNoteTransportRecord = 0x0b;
+constexpr uint32_t kDigiLiveControlGroupNavigation = 0x0d;
+constexpr uint32_t kDigiLiveControlGroupTransport = 0x0e;
+constexpr uint32_t kDigiLiveControlCCJogWheel = 0x4e;
+constexpr uint32_t kDigiLiveControlCCShuttle = 0x5e;
 constexpr uint32_t kDigiLiveControlMotorTestEnabled = 1;
 constexpr uint32_t kDigiLiveControlMotorTestLowTarget10 = 256;
 constexpr uint32_t kDigiLiveControlMotorTestHighTarget10 = 768;
@@ -1247,8 +1269,22 @@ uint32_t gDigiLiveControlFader1Touched = 0;
 uint32_t gDigiLiveControlFader1ControlNumber = 0;
 uint32_t gDigiLiveControlFader1Value = 0;
 uint64_t gDigiLiveControlFader1UpdateCount = 0;
+uint32_t gDigiLiveControlTransportRTZPressed = 0;
+uint32_t gDigiLiveControlTransportRewindPressed = 0;
+uint32_t gDigiLiveControlTransportFastForwardPressed = 0;
 uint32_t gDigiLiveControlStopPressed = 0;
 uint32_t gDigiLiveControlPlayPressed = 0;
+uint32_t gDigiLiveControlTransportRecordPressed = 0;
+uint32_t gDigiLiveControlArrowLeftPressed = 0;
+uint32_t gDigiLiveControlArrowRightPressed = 0;
+uint32_t gDigiLiveControlArrowUpPressed = 0;
+uint32_t gDigiLiveControlArrowDownPressed = 0;
+uint32_t gDigiLiveControlJogWheelValue = 0;
+uint32_t gDigiLiveControlJogWheelDirection = 0;
+uint32_t gDigiLiveControlJogWheelStep = 0;
+uint64_t gDigiLiveControlJogWheelUpdateCount = 0;
+uint32_t gDigiLiveControlShuttleValue = 0;
+uint64_t gDigiLiveControlShuttleUpdateCount = 0;
 uint64_t gDigiLiveControlMotorTestTriggerCount = 0;
 uint64_t gDigiLiveControlMotorTestMessageCount = 0;
 uint64_t gDigiLiveControlMotorTestSkippedCount = 0;
@@ -1576,7 +1612,7 @@ PublishDigiLiveControlDiagnostics(uint32_t rawWordBE,
         return;
     }
 
-    OSDictionary * properties = OSDictionary::withCapacity(72);
+    OSDictionary * properties = OSDictionary::withCapacity(96);
     if (properties == nullptr) {
         return;
     }
@@ -1628,8 +1664,43 @@ PublishDigiLiveControlDiagnostics(uint32_t rawWordBE,
                       "ProbeControlStateFader1UpdateCount",
                       gDigiLiveControlFader1UpdateCount,
                       64);
+    AddNumberProperty(properties,
+                      "ProbeControlStateTransportRTZPressed",
+                      gDigiLiveControlTransportRTZPressed,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeControlStateTransportRewindPressed",
+                      gDigiLiveControlTransportRewindPressed,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeControlStateTransportFastForwardPressed",
+                      gDigiLiveControlTransportFastForwardPressed,
+                      32);
     AddNumberProperty(properties, "ProbeControlStateStopPressed", gDigiLiveControlStopPressed, 32);
     AddNumberProperty(properties, "ProbeControlStatePlayPressed", gDigiLiveControlPlayPressed, 32);
+    AddNumberProperty(properties,
+                      "ProbeControlStateTransportRecordPressed",
+                      gDigiLiveControlTransportRecordPressed,
+                      32);
+    AddNumberProperty(properties, "ProbeControlStateArrowLeftPressed", gDigiLiveControlArrowLeftPressed, 32);
+    AddNumberProperty(properties, "ProbeControlStateArrowRightPressed", gDigiLiveControlArrowRightPressed, 32);
+    AddNumberProperty(properties, "ProbeControlStateArrowUpPressed", gDigiLiveControlArrowUpPressed, 32);
+    AddNumberProperty(properties, "ProbeControlStateArrowDownPressed", gDigiLiveControlArrowDownPressed, 32);
+    AddNumberProperty(properties, "ProbeControlStateJogWheelValue", gDigiLiveControlJogWheelValue, 32);
+    AddNumberProperty(properties,
+                      "ProbeControlStateJogWheelDirection",
+                      gDigiLiveControlJogWheelDirection,
+                      32);
+    AddNumberProperty(properties, "ProbeControlStateJogWheelStep", gDigiLiveControlJogWheelStep, 32);
+    AddNumberProperty(properties,
+                      "ProbeControlStateJogWheelUpdateCount",
+                      gDigiLiveControlJogWheelUpdateCount,
+                      64);
+    AddNumberProperty(properties, "ProbeControlStateShuttleValue", gDigiLiveControlShuttleValue, 32);
+    AddNumberProperty(properties,
+                      "ProbeControlStateShuttleUpdateCount",
+                      gDigiLiveControlShuttleUpdateCount,
+                      64);
     AddNumberProperty(properties, "ProbeControlMotorTestEnabled", kDigiLiveControlMotorTestEnabled, 32);
     AddNumberProperty(properties,
                       "ProbeControlMotorTestTriggerCount",
@@ -1786,8 +1857,10 @@ ObserveDigiLiveMappedControlState(uint32_t portNibble,
 
     if (command == 0x90u) {
         uint32_t pressed = (data2 & 0x40u) != 0 ? 1u : 0u;
+        uint32_t noteGroup = data2 & 0x0fu;
         uint32_t channel = data2 & 0x07u;
         if (data1 == kDigiLiveControlNoteChannelSelect &&
+            noteGroup < kDigiLiveControlChannelStripCount &&
             channel < kDigiLiveControlChannelStripCount) {
             gDigiLiveControlChannelSelectPressed[channel] = pressed;
             gDigiLiveControlLastMappedKind = kDigiLiveControlKindChannelSelect;
@@ -1810,18 +1883,21 @@ ObserveDigiLiveMappedControlState(uint32_t portNibble,
             }
             mapped = true;
         } else if (data1 == kDigiLiveControlNoteChannelSolo &&
+                   noteGroup < kDigiLiveControlChannelStripCount &&
                    channel < kDigiLiveControlChannelStripCount) {
             gDigiLiveControlChannelSoloPressed[channel] = pressed;
             gDigiLiveControlLastMappedKind = kDigiLiveControlKindChannelSolo;
             gDigiLiveControlLastMappedChannel = channel;
             mapped = true;
         } else if (data1 == kDigiLiveControlNoteChannelMute &&
+                   noteGroup < kDigiLiveControlChannelStripCount &&
                    channel < kDigiLiveControlChannelStripCount) {
             gDigiLiveControlChannelMutePressed[channel] = pressed;
             gDigiLiveControlLastMappedKind = kDigiLiveControlKindChannelMute;
             gDigiLiveControlLastMappedChannel = channel;
             mapped = true;
         } else if (data1 == kDigiLiveControlNoteChannelFaderTouch &&
+                   noteGroup < kDigiLiveControlChannelStripCount &&
                    channel < kDigiLiveControlChannelStripCount) {
             gDigiLiveControlChannelFaderTouched[channel] = pressed;
             gDigiLiveControlLastMappedKind = kDigiLiveControlKindChannelFaderTouch;
@@ -1830,30 +1906,104 @@ ObserveDigiLiveMappedControlState(uint32_t portNibble,
                 gDigiLiveControlFader1Touched = pressed;
             }
             mapped = true;
-        } else if (data1 == kDigiLiveControlNoteStop) {
+        } else if (noteGroup == kDigiLiveControlGroupTransport &&
+                   data1 == kDigiLiveControlNoteTransportRTZ) {
+            gDigiLiveControlTransportRTZPressed = pressed;
+            gDigiLiveControlLastMappedKind = kDigiLiveControlKindTransportRTZ;
+            gDigiLiveControlLastMappedChannel = 0xffffffff;
+            mapped = true;
+        } else if (noteGroup == kDigiLiveControlGroupTransport &&
+                   data1 == kDigiLiveControlNoteTransportRewind) {
+            gDigiLiveControlTransportRewindPressed = pressed;
+            gDigiLiveControlLastMappedKind = kDigiLiveControlKindTransportRewind;
+            gDigiLiveControlLastMappedChannel = 0xffffffff;
+            mapped = true;
+        } else if (noteGroup == kDigiLiveControlGroupTransport &&
+                   data1 == kDigiLiveControlNoteTransportFastForward) {
+            gDigiLiveControlTransportFastForwardPressed = pressed;
+            gDigiLiveControlLastMappedKind = kDigiLiveControlKindTransportFastForward;
+            gDigiLiveControlLastMappedChannel = 0xffffffff;
+            mapped = true;
+        } else if (noteGroup == kDigiLiveControlGroupTransport &&
+                   data1 == kDigiLiveControlNoteStop) {
             gDigiLiveControlStopPressed = pressed;
             gDigiLiveControlLastMappedKind = kDigiLiveControlKindStop;
             gDigiLiveControlLastMappedChannel = 0xffffffff;
             mapped = true;
-        } else if (data1 == kDigiLiveControlNotePlay) {
+        } else if (noteGroup == kDigiLiveControlGroupTransport &&
+                   data1 == kDigiLiveControlNotePlay) {
             gDigiLiveControlPlayPressed = pressed;
             gDigiLiveControlLastMappedKind = kDigiLiveControlKindPlay;
             gDigiLiveControlLastMappedChannel = 0xffffffff;
             mapped = true;
+        } else if (noteGroup == kDigiLiveControlGroupTransport &&
+                   data1 == kDigiLiveControlNoteTransportRecord) {
+            gDigiLiveControlTransportRecordPressed = pressed;
+            gDigiLiveControlLastMappedKind = kDigiLiveControlKindTransportRecord;
+            gDigiLiveControlLastMappedChannel = 0xffffffff;
+            mapped = true;
+        } else if (noteGroup == kDigiLiveControlGroupNavigation &&
+                   data1 == kDigiLiveControlNoteArrowLeft) {
+            gDigiLiveControlArrowLeftPressed = pressed;
+            gDigiLiveControlLastMappedKind = kDigiLiveControlKindArrowLeft;
+            gDigiLiveControlLastMappedChannel = 0xffffffff;
+            mapped = true;
+        } else if (noteGroup == kDigiLiveControlGroupNavigation &&
+                   data1 == kDigiLiveControlNoteArrowRight) {
+            gDigiLiveControlArrowRightPressed = pressed;
+            gDigiLiveControlLastMappedKind = kDigiLiveControlKindArrowRight;
+            gDigiLiveControlLastMappedChannel = 0xffffffff;
+            mapped = true;
+        } else if (noteGroup == kDigiLiveControlGroupNavigation &&
+                   data1 == kDigiLiveControlNoteArrowUp) {
+            gDigiLiveControlArrowUpPressed = pressed;
+            gDigiLiveControlLastMappedKind = kDigiLiveControlKindArrowUp;
+            gDigiLiveControlLastMappedChannel = 0xffffffff;
+            mapped = true;
+        } else if (noteGroup == kDigiLiveControlGroupNavigation &&
+                   data1 == kDigiLiveControlNoteArrowDown) {
+            gDigiLiveControlArrowDownPressed = pressed;
+            gDigiLiveControlLastMappedKind = kDigiLiveControlKindArrowDown;
+            gDigiLiveControlLastMappedChannel = 0xffffffff;
+            mapped = true;
         }
-    } else if (command == 0xb0u && data1 <= 0x3fu) {
-        uint32_t channel = data1 & 0x07u;
-        if (channel < kDigiLiveControlChannelStripCount) {
-            gDigiLiveControlChannelFaderControlNumber[channel] = data1;
-            gDigiLiveControlChannelFaderValue[channel] = data2;
-            gDigiLiveControlChannelFaderUpdateCount[channel]++;
-            gDigiLiveControlLastMappedKind = kDigiLiveControlKindChannelFaderMove;
-            gDigiLiveControlLastMappedChannel = channel;
-            if (channel == 0) {
-                gDigiLiveControlFader1ControlNumber = data1;
-                gDigiLiveControlFader1Value = data2;
-                gDigiLiveControlFader1UpdateCount++;
+    } else if (command == 0xb0u) {
+        if (data1 <= 0x3fu) {
+            uint32_t channel = data1 & 0x07u;
+            if (channel < kDigiLiveControlChannelStripCount) {
+                gDigiLiveControlChannelFaderControlNumber[channel] = data1;
+                gDigiLiveControlChannelFaderValue[channel] = data2;
+                gDigiLiveControlChannelFaderUpdateCount[channel]++;
+                gDigiLiveControlLastMappedKind = kDigiLiveControlKindChannelFaderMove;
+                gDigiLiveControlLastMappedChannel = channel;
+                if (channel == 0) {
+                    gDigiLiveControlFader1ControlNumber = data1;
+                    gDigiLiveControlFader1Value = data2;
+                    gDigiLiveControlFader1UpdateCount++;
+                }
+                mapped = true;
             }
+        } else if (data1 == kDigiLiveControlCCJogWheel) {
+            gDigiLiveControlJogWheelValue = data2;
+            if (data2 > 0x40u) {
+                gDigiLiveControlJogWheelDirection = 1;
+                gDigiLiveControlJogWheelStep = data2 - 0x40u;
+            } else if (data2 < 0x40u) {
+                gDigiLiveControlJogWheelDirection = 2;
+                gDigiLiveControlJogWheelStep = 0x40u - data2;
+            } else {
+                gDigiLiveControlJogWheelDirection = 0;
+                gDigiLiveControlJogWheelStep = 0;
+            }
+            gDigiLiveControlJogWheelUpdateCount++;
+            gDigiLiveControlLastMappedKind = kDigiLiveControlKindJogWheel;
+            gDigiLiveControlLastMappedChannel = 0xffffffff;
+            mapped = true;
+        } else if (data1 == kDigiLiveControlCCShuttle) {
+            gDigiLiveControlShuttleValue = data2;
+            gDigiLiveControlShuttleUpdateCount++;
+            gDigiLiveControlLastMappedKind = kDigiLiveControlKindShuttle;
+            gDigiLiveControlLastMappedChannel = 0xffffffff;
             mapped = true;
         }
     }
@@ -2024,6 +2174,10 @@ QueueDigiLiveDecodedMidiFeedback(uint32_t portNibble,
 
     uint8_t command = static_cast<uint8_t>(status & 0xf0u);
     if (command != 0x80u && command != 0x90u && command != 0xb0u) {
+        gDigiLiveMidiFeedbackSkippedCount++;
+        return false;
+    }
+    if (command == 0xb0u && data1 > 0x3fu) {
         gDigiLiveMidiFeedbackSkippedCount++;
         return false;
     }
@@ -2758,8 +2912,43 @@ PublishAudioRuntimeDiagnostics()
                       "ProbeControlStateFader1UpdateCount",
                       gDigiLiveControlFader1UpdateCount,
                       64);
+    AddNumberProperty(properties,
+                      "ProbeControlStateTransportRTZPressed",
+                      gDigiLiveControlTransportRTZPressed,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeControlStateTransportRewindPressed",
+                      gDigiLiveControlTransportRewindPressed,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeControlStateTransportFastForwardPressed",
+                      gDigiLiveControlTransportFastForwardPressed,
+                      32);
     AddNumberProperty(properties, "ProbeControlStateStopPressed", gDigiLiveControlStopPressed, 32);
     AddNumberProperty(properties, "ProbeControlStatePlayPressed", gDigiLiveControlPlayPressed, 32);
+    AddNumberProperty(properties,
+                      "ProbeControlStateTransportRecordPressed",
+                      gDigiLiveControlTransportRecordPressed,
+                      32);
+    AddNumberProperty(properties, "ProbeControlStateArrowLeftPressed", gDigiLiveControlArrowLeftPressed, 32);
+    AddNumberProperty(properties, "ProbeControlStateArrowRightPressed", gDigiLiveControlArrowRightPressed, 32);
+    AddNumberProperty(properties, "ProbeControlStateArrowUpPressed", gDigiLiveControlArrowUpPressed, 32);
+    AddNumberProperty(properties, "ProbeControlStateArrowDownPressed", gDigiLiveControlArrowDownPressed, 32);
+    AddNumberProperty(properties, "ProbeControlStateJogWheelValue", gDigiLiveControlJogWheelValue, 32);
+    AddNumberProperty(properties,
+                      "ProbeControlStateJogWheelDirection",
+                      gDigiLiveControlJogWheelDirection,
+                      32);
+    AddNumberProperty(properties, "ProbeControlStateJogWheelStep", gDigiLiveControlJogWheelStep, 32);
+    AddNumberProperty(properties,
+                      "ProbeControlStateJogWheelUpdateCount",
+                      gDigiLiveControlJogWheelUpdateCount,
+                      64);
+    AddNumberProperty(properties, "ProbeControlStateShuttleValue", gDigiLiveControlShuttleValue, 32);
+    AddNumberProperty(properties,
+                      "ProbeControlStateShuttleUpdateCount",
+                      gDigiLiveControlShuttleUpdateCount,
+                      64);
     AddNumberProperty(properties, "ProbeControlMotorTestEnabled", kDigiLiveControlMotorTestEnabled, 32);
     AddNumberProperty(properties,
                       "ProbeControlMotorTestTriggerCount",
@@ -4366,8 +4555,22 @@ ConfigureAudioDevice(FireWireOHCIProbe * driver)
     gDigiLiveControlFader1ControlNumber = 0;
     gDigiLiveControlFader1Value = 0;
     gDigiLiveControlFader1UpdateCount = 0;
+    gDigiLiveControlTransportRTZPressed = 0;
+    gDigiLiveControlTransportRewindPressed = 0;
+    gDigiLiveControlTransportFastForwardPressed = 0;
     gDigiLiveControlStopPressed = 0;
     gDigiLiveControlPlayPressed = 0;
+    gDigiLiveControlTransportRecordPressed = 0;
+    gDigiLiveControlArrowLeftPressed = 0;
+    gDigiLiveControlArrowRightPressed = 0;
+    gDigiLiveControlArrowUpPressed = 0;
+    gDigiLiveControlArrowDownPressed = 0;
+    gDigiLiveControlJogWheelValue = 0;
+    gDigiLiveControlJogWheelDirection = 0;
+    gDigiLiveControlJogWheelStep = 0;
+    gDigiLiveControlJogWheelUpdateCount = 0;
+    gDigiLiveControlShuttleValue = 0;
+    gDigiLiveControlShuttleUpdateCount = 0;
     gDigiLiveControlMotorTestTriggerCount = 0;
     gDigiLiveControlMotorTestMessageCount = 0;
     gDigiLiveControlMotorTestSkippedCount = 0;

@@ -1986,6 +1986,50 @@ Live test results:
   `ProbeAudioRuntimeOutputRingOverrunFrames=0`, and
   `ProbeDigiLiveOutputCursorCatchUpCount=0`.
 
+## 0.2.165 Navigation, Jog, and Shuttle Mapping
+
+Extends the slot-0 Digi 003 control map beyond channel strips and the PLAY/STOP
+pair.
+
+Mapped note groups:
+
+```text
+Transport group: data2 low nibble 0xe
+  90 06 4e/0e = RTZ press/release
+  90 07 4e/0e = REW press/release
+  90 08 4e/0e = FFWD press/release
+  90 09 4e/0e = STOP press/release
+  90 0a 4e/0e = PLAY press/release
+  90 0b 4e/0e = REC press/release
+
+Navigation group: data2 low nibble 0xd
+  90 05 4d/0d = Arrow Left press/release
+  90 06 4d/0d = Arrow Right press/release
+  90 07 4d/0d = Arrow Up press/release
+  90 08 4d/0d = Arrow Down press/release
+```
+
+Mapped control-change messages:
+
+```text
+B0 4e 41 / B0 4e 3f = jog wheel relative ticks
+B0 5e xx             = spring-loaded shuttle/encoder raw value
+```
+
+The automatic LED/fader echo now only returns note messages and fader-position
+CCs (`B0 00..3f`). Jog and shuttle CCs are read-only in the feedback path so
+they cannot accidentally be interpreted as motor-fader commands while we finish
+the control map.
+
+Live safety test results:
+
+- Shuttle produced `B0 5e` values across the raw `0..15` range.
+- Jog wheel produced relative `B0 4e 41` ticks.
+- Feedback stayed disabled for Jog/Shuttle (`feedback=0`, `drops=0`), and the
+  motor-fader probe did not trigger (`motor=0/0/0`).
+- Fader 7 stayed still during the Shuttle test, confirming the previous
+  movement was caused by echoing the Shuttle CC back to the console.
+
 ## Async Control Reference
 
 The Rust `firewire-digi00x-protocols` crate is supplemental runtime code for internal functions outside the isochronous packet stream. It is useful for later mixer/control-surface work, but it does not solve the current live RX harvest issue.

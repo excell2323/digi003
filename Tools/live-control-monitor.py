@@ -14,8 +14,18 @@ CHANNEL_NOTE_NAMES = {
     0x03: "FADER TOUCH",
 }
 TRANSPORT_NOTE_NAMES = {
+    0x06: "RTZ",
+    0x07: "REW",
+    0x08: "FFWD",
     0x09: "STOP",
     0x0A: "PLAY",
+    0x0B: "REC",
+}
+NAVIGATION_NOTE_NAMES = {
+    0x05: "ARROW LEFT",
+    0x06: "ARROW RIGHT",
+    0x07: "ARROW UP",
+    0x08: "ARROW DOWN",
 }
 
 
@@ -81,17 +91,34 @@ def describe_message(message):
 
     if command in (0x80, 0x90):
         pressed = (data2 & 0x40) != 0
+        group = data2 & 0x0F
         state = "press" if pressed else "release"
-        if data1 in TRANSPORT_NOTE_NAMES:
+        if group == 0x0E and data1 in TRANSPORT_NOTE_NAMES:
             name = TRANSPORT_NOTE_NAMES[data1]
             return f"{prefix} | {name} {state} value=0x{data2:02X}"
-        if data1 in CHANNEL_NOTE_NAMES:
+        if group == 0x0D and data1 in NAVIGATION_NOTE_NAMES:
+            name = NAVIGATION_NOTE_NAMES[data1]
+            return f"{prefix} | {name} {state} value=0x{data2:02X}"
+        if group < 8 and data1 in CHANNEL_NOTE_NAMES:
             channel = (data2 & 0x07) + 1
             name = CHANNEL_NOTE_NAMES[data1]
             return f"{prefix} | CH{channel} {name} {state} value=0x{data2:02X}"
         return f"{prefix} | UNKNOWN NOTE 0x{data1:02X} {state} value=0x{data2:02X}"
 
     if command == 0xB0:
+        if data1 == 0x4E:
+            if data2 > 0x40:
+                direction = "RIGHT"
+                step = data2 - 0x40
+            elif data2 < 0x40:
+                direction = "LEFT"
+                step = 0x40 - data2
+            else:
+                direction = "CENTER"
+                step = 0
+            return f"{prefix} | JOG {direction} step={step} value={data2}"
+        if data1 == 0x5E:
+            return f"{prefix} | SHUTTLE value={data2}"
         if data1 <= 0x3F:
             channel = (data1 & 0x07) + 1
             return f"{prefix} | CH{channel} FADER MOVE cc=0x{data1:02X} value={data2}"
@@ -107,8 +134,22 @@ def state_summary(text):
         "f1cc": parse_number(text, "ProbeControlStateFader1ControlNumber"),
         "f1val": parse_number(text, "ProbeControlStateFader1Value"),
         "f1updates": parse_number(text, "ProbeControlStateFader1UpdateCount"),
+        "rtz": parse_number(text, "ProbeControlStateTransportRTZPressed"),
+        "rew": parse_number(text, "ProbeControlStateTransportRewindPressed"),
+        "ffwd": parse_number(text, "ProbeControlStateTransportFastForwardPressed"),
         "stop": parse_number(text, "ProbeControlStateStopPressed"),
         "play": parse_number(text, "ProbeControlStatePlayPressed"),
+        "rec": parse_number(text, "ProbeControlStateTransportRecordPressed"),
+        "left": parse_number(text, "ProbeControlStateArrowLeftPressed"),
+        "right": parse_number(text, "ProbeControlStateArrowRightPressed"),
+        "up": parse_number(text, "ProbeControlStateArrowUpPressed"),
+        "down": parse_number(text, "ProbeControlStateArrowDownPressed"),
+        "jog_value": parse_number(text, "ProbeControlStateJogWheelValue"),
+        "jog_direction": parse_number(text, "ProbeControlStateJogWheelDirection"),
+        "jog_step": parse_number(text, "ProbeControlStateJogWheelStep"),
+        "jog_updates": parse_number(text, "ProbeControlStateJogWheelUpdateCount"),
+        "shuttle_value": parse_number(text, "ProbeControlStateShuttleValue"),
+        "shuttle_updates": parse_number(text, "ProbeControlStateShuttleUpdateCount"),
         "last_channel": parse_number(text, "ProbeControlStateLastMappedChannel", 0xFFFFFFFF),
         "mapped": parse_number(text, "ProbeControlStateMappedMessageCount"),
         "unknown": parse_number(text, "ProbeControlStateUnknownMessageCount"),
@@ -137,10 +178,17 @@ def state_summary(text):
     last_channel_text = "-" if last_channel == 0xFFFFFFFF else str(last_channel + 1)
     motor_channel = values["motor_channel"]
     motor_channel_text = "-" if motor_channel == 0xFFFFFFFF else str(motor_channel + 1)
+    jog_direction_text = {0: "-", 1: "right", 2: "left"}.get(values["jog_direction"], "?")
     return (
         f"state sel1={values['sel1']} f1touch={values['f1touch']} "
         f"f1cc=0x{values['f1cc']:02X} f1val={values['f1val']} "
-        f"f1updates={values['f1updates']} stop={values['stop']} play={values['play']} "
+        f"f1updates={values['f1updates']} transport="
+        f"{values['rtz']}{values['rew']}{values['ffwd']}"
+        f"{values['stop']}{values['play']}{values['rec']} "
+        f"arrows=LRUD:{values['left']}{values['right']}{values['up']}{values['down']} "
+        f"jog={jog_direction_text}:{values['jog_step']}@{values['jog_value']}/"
+        f"{values['jog_updates']} shuttle={values['shuttle_value']}/"
+        f"{values['shuttle_updates']} "
         f"last_ch={last_channel_text} mapped={values['mapped']} unknown={values['unknown']} "
         f"feedback={values['feedback']} drops={values['drops']} "
         f"motor={values['motor_triggers']}/{values['motor_messages']}/"
