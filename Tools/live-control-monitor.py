@@ -27,6 +27,31 @@ NAVIGATION_NOTE_NAMES = {
     0x07: "ARROW UP",
     0x08: "ARROW DOWN",
 }
+MODE_VIEW_NOTE_FIRST = 0x00
+MODE_VIEW_NOTE_COUNT = 20
+MODE_VIEW_NOTE_NAMES = {
+    0x00: "PAN",
+    0x01: "SEND",
+    0x02: "INSERT",
+    0x03: "A/F",
+    0x04: "B/G",
+    0x05: "C/H",
+    0x06: "D/I",
+    0x07: "E/J",
+}
+ENCODER_ASSIGN_NOTE_COUNT = 8
+ENCODER_ASSIGN_NOTE_NAMES = {
+    0x00: "EQ",
+    0x01: "DYNAMICS",
+    0x02: "INSERT",
+    0x03: "PAN/SEND",
+    0x04: "PAGE LEFT",
+    0x05: "PAGE RIGHT",
+    0x06: "MASTER BYPASS",
+    0x07: "ESC",
+}
+ROTARY_ENCODER_CC_FIRST = 0x40
+ROTARY_ENCODER_COUNT = 8
 
 
 def read_ioreg():
@@ -99,6 +124,12 @@ def describe_message(message):
         if group == 0x0D and data1 in NAVIGATION_NOTE_NAMES:
             name = NAVIGATION_NOTE_NAMES[data1]
             return f"{prefix} | {name} {state} value=0x{data2:02X}"
+        if group == 0x0A and MODE_VIEW_NOTE_FIRST <= data1 < MODE_VIEW_NOTE_FIRST + MODE_VIEW_NOTE_COUNT:
+            name = MODE_VIEW_NOTE_NAMES.get(data1, f"MODE/VIEW {data1:02X}")
+            return f"{prefix} | {name} {state} value=0x{data2:02X}"
+        if group == 0x0B and data1 < ENCODER_ASSIGN_NOTE_COUNT:
+            name = ENCODER_ASSIGN_NOTE_NAMES.get(data1, f"ENCODER ASSIGN {data1 + 1}")
+            return f"{prefix} | {name} {state} value=0x{data2:02X}"
         if group < 8 and data1 in CHANNEL_NOTE_NAMES:
             channel = (data2 & 0x07) + 1
             name = CHANNEL_NOTE_NAMES[data1]
@@ -106,6 +137,18 @@ def describe_message(message):
         return f"{prefix} | UNKNOWN NOTE 0x{data1:02X} {state} value=0x{data2:02X}"
 
     if command == 0xB0:
+        if ROTARY_ENCODER_CC_FIRST <= data1 < ROTARY_ENCODER_CC_FIRST + ROTARY_ENCODER_COUNT:
+            encoder = data1 - ROTARY_ENCODER_CC_FIRST + 1
+            if data2 > 0x40:
+                direction = "RIGHT"
+                step = data2 - 0x40
+            elif data2 < 0x40:
+                direction = "LEFT"
+                step = 0x40 - data2
+            else:
+                direction = "CENTER"
+                step = 0
+            return f"{prefix} | ENCODER {encoder} {direction} step={step} value={data2}"
         if data1 == 0x4E:
             if data2 > 0x40:
                 direction = "RIGHT"
@@ -150,6 +193,11 @@ def state_summary(text):
         "jog_updates": parse_number(text, "ProbeControlStateJogWheelUpdateCount"),
         "shuttle_value": parse_number(text, "ProbeControlStateShuttleValue"),
         "shuttle_updates": parse_number(text, "ProbeControlStateShuttleUpdateCount"),
+        "mode_last": parse_number(text, "ProbeControlStateModeViewLastIndex", 0xFFFFFFFF),
+        "mode_updates": parse_number(text, "ProbeControlStateModeViewUpdateCount"),
+        "assign_last": parse_number(text, "ProbeControlStateEncoderAssignLastIndex", 0xFFFFFFFF),
+        "assign_updates": parse_number(text, "ProbeControlStateEncoderAssignUpdateCount"),
+        "encoder_last": parse_number(text, "ProbeControlStateRotaryEncoderLastIndex", 0xFFFFFFFF),
         "last_channel": parse_number(text, "ProbeControlStateLastMappedChannel", 0xFFFFFFFF),
         "mapped": parse_number(text, "ProbeControlStateMappedMessageCount"),
         "unknown": parse_number(text, "ProbeControlStateUnknownMessageCount"),
@@ -179,6 +227,9 @@ def state_summary(text):
     motor_channel = values["motor_channel"]
     motor_channel_text = "-" if motor_channel == 0xFFFFFFFF else str(motor_channel + 1)
     jog_direction_text = {0: "-", 1: "right", 2: "left"}.get(values["jog_direction"], "?")
+    mode_last_text = "-" if values["mode_last"] == 0xFFFFFFFF else str(values["mode_last"] + 1)
+    assign_last_text = "-" if values["assign_last"] == 0xFFFFFFFF else str(values["assign_last"] + 1)
+    encoder_last_text = "-" if values["encoder_last"] == 0xFFFFFFFF else str(values["encoder_last"] + 1)
     return (
         f"state sel1={values['sel1']} f1touch={values['f1touch']} "
         f"f1cc=0x{values['f1cc']:02X} f1val={values['f1val']} "
@@ -188,7 +239,9 @@ def state_summary(text):
         f"arrows=LRUD:{values['left']}{values['right']}{values['up']}{values['down']} "
         f"jog={jog_direction_text}:{values['jog_step']}@{values['jog_value']}/"
         f"{values['jog_updates']} shuttle={values['shuttle_value']}/"
-        f"{values['shuttle_updates']} "
+        f"{values['shuttle_updates']} mode={mode_last_text}/{values['mode_updates']} "
+        f"assign={assign_last_text}/{values['assign_updates']} "
+        f"enc_last={encoder_last_text} "
         f"last_ch={last_channel_text} mapped={values['mapped']} unknown={values['unknown']} "
         f"feedback={values['feedback']} drops={values['drops']} "
         f"motor={values['motor_triggers']}/{values['motor_messages']}/"

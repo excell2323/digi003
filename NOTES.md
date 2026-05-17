@@ -2033,6 +2033,37 @@ Live safety test results:
   Arrow Left, Arrow Right, Arrow Up, and Arrow Down with `0` unknown messages
   and `0` feedback drops.
 
+## 0.2.166 Encoder and Mode/View Block Probe
+
+Adds named diagnostics for the next confirmed control-surface blocks:
+
+```text
+90 00..13 4a/0a = Mode/View and Insert/Send Position block
+90 00 4a/0a     = PAN
+90 01 4a/0a     = SEND
+90 02 4a/0a     = INSERT
+90 03 4a/0a     = A/F
+90 04 4a/0a     = B/G
+90 05 4a/0a     = C/H
+90 06 4a/0a     = D/I
+90 07 4a/0a     = E/J
+90 00..07 4b/0b = 8-button Encoder Assignment block
+90 00 4b/0b     = EQ
+90 01 4b/0b     = DYNAMICS
+90 02 4b/0b     = INSERT
+90 03 4b/0b     = PAN/SEND
+90 04 4b/0b     = PAGE LEFT
+90 05 4b/0b     = PAGE RIGHT
+90 06 4b/0b     = MASTER BYPASS
+90 07 4b/0b     = ESC
+B0 40..47 41     = rotary encoder 1..8 clockwise ticks
+B0 40..47 3f     = rotary encoder 1..8 counter-clockwise ticks
+```
+
+The monitor labels the confirmed insert/send position switches as `A/F` through
+`E/J`, and labels the rest of the group provisionally as `MODE/VIEW xx` until
+the two-press confirmation pass is complete.
+
 ## Async Control Reference
 
 The Rust `firewire-digi00x-protocols` crate is supplemental runtime code for internal functions outside the isochronous packet stream. It is useful for later mixer/control-surface work, but it does not solve the current live RX harvest issue.

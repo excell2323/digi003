@@ -250,6 +250,9 @@ constexpr uint32_t kDigiLiveControlKindArrowUp = 14;
 constexpr uint32_t kDigiLiveControlKindArrowDown = 15;
 constexpr uint32_t kDigiLiveControlKindJogWheel = 16;
 constexpr uint32_t kDigiLiveControlKindShuttle = 17;
+constexpr uint32_t kDigiLiveControlKindModeViewButton = 18;
+constexpr uint32_t kDigiLiveControlKindEncoderAssignButton = 19;
+constexpr uint32_t kDigiLiveControlKindRotaryEncoder = 20;
 constexpr uint32_t kDigiLiveControlNoteChannelSelect = 0x00;
 constexpr uint32_t kDigiLiveControlNoteChannelSolo = 0x01;
 constexpr uint32_t kDigiLiveControlNoteChannelMute = 0x02;
@@ -266,6 +269,13 @@ constexpr uint32_t kDigiLiveControlNotePlay = 0x0a;
 constexpr uint32_t kDigiLiveControlNoteTransportRecord = 0x0b;
 constexpr uint32_t kDigiLiveControlGroupNavigation = 0x0d;
 constexpr uint32_t kDigiLiveControlGroupTransport = 0x0e;
+constexpr uint32_t kDigiLiveControlGroupModeView = 0x0a;
+constexpr uint32_t kDigiLiveControlGroupEncoderAssign = 0x0b;
+constexpr uint32_t kDigiLiveControlModeViewButtonCount = 20;
+constexpr uint32_t kDigiLiveControlModeViewFirstNote = 0x00;
+constexpr uint32_t kDigiLiveControlEncoderAssignButtonCount = 8;
+constexpr uint32_t kDigiLiveControlRotaryEncoderCount = 8;
+constexpr uint32_t kDigiLiveControlCCRotaryEncoderFirst = 0x40;
 constexpr uint32_t kDigiLiveControlCCJogWheel = 0x4e;
 constexpr uint32_t kDigiLiveControlCCShuttle = 0x5e;
 constexpr uint32_t kDigiLiveControlMotorTestEnabled = 1;
@@ -1285,6 +1295,19 @@ uint32_t gDigiLiveControlJogWheelStep = 0;
 uint64_t gDigiLiveControlJogWheelUpdateCount = 0;
 uint32_t gDigiLiveControlShuttleValue = 0;
 uint64_t gDigiLiveControlShuttleUpdateCount = 0;
+uint32_t gDigiLiveControlModeViewButtonPressed[kDigiLiveControlModeViewButtonCount] = {};
+uint32_t gDigiLiveControlModeViewLastNote = 0xffffffff;
+uint32_t gDigiLiveControlModeViewLastIndex = 0xffffffff;
+uint64_t gDigiLiveControlModeViewUpdateCount = 0;
+uint32_t gDigiLiveControlEncoderAssignButtonPressed[kDigiLiveControlEncoderAssignButtonCount] = {};
+uint32_t gDigiLiveControlEncoderAssignLastNote = 0xffffffff;
+uint32_t gDigiLiveControlEncoderAssignLastIndex = 0xffffffff;
+uint64_t gDigiLiveControlEncoderAssignUpdateCount = 0;
+uint32_t gDigiLiveControlRotaryEncoderValue[kDigiLiveControlRotaryEncoderCount] = {};
+uint32_t gDigiLiveControlRotaryEncoderDirection[kDigiLiveControlRotaryEncoderCount] = {};
+uint32_t gDigiLiveControlRotaryEncoderStep[kDigiLiveControlRotaryEncoderCount] = {};
+uint64_t gDigiLiveControlRotaryEncoderUpdateCount[kDigiLiveControlRotaryEncoderCount] = {};
+uint32_t gDigiLiveControlRotaryEncoderLastIndex = 0xffffffff;
 uint64_t gDigiLiveControlMotorTestTriggerCount = 0;
 uint64_t gDigiLiveControlMotorTestMessageCount = 0;
 uint64_t gDigiLiveControlMotorTestSkippedCount = 0;
@@ -1612,7 +1635,7 @@ PublishDigiLiveControlDiagnostics(uint32_t rawWordBE,
         return;
     }
 
-    OSDictionary * properties = OSDictionary::withCapacity(96);
+    OSDictionary * properties = OSDictionary::withCapacity(160);
     if (properties == nullptr) {
         return;
     }
@@ -1701,6 +1724,70 @@ PublishDigiLiveControlDiagnostics(uint32_t rawWordBE,
                       "ProbeControlStateShuttleUpdateCount",
                       gDigiLiveControlShuttleUpdateCount,
                       64);
+    AddNumberProperty(properties, "ProbeControlStateModeViewLastNote", gDigiLiveControlModeViewLastNote, 32);
+    AddNumberProperty(properties, "ProbeControlStateModeViewLastIndex", gDigiLiveControlModeViewLastIndex, 32);
+    AddNumberProperty(properties,
+                      "ProbeControlStateModeViewUpdateCount",
+                      gDigiLiveControlModeViewUpdateCount,
+                      64);
+    AddNumberProperty(properties,
+                      "ProbeControlStateEncoderAssignLastNote",
+                      gDigiLiveControlEncoderAssignLastNote,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeControlStateEncoderAssignLastIndex",
+                      gDigiLiveControlEncoderAssignLastIndex,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeControlStateEncoderAssignUpdateCount",
+                      gDigiLiveControlEncoderAssignUpdateCount,
+                      64);
+    AddNumberProperty(properties,
+                      "ProbeControlStateRotaryEncoderLastIndex",
+                      gDigiLiveControlRotaryEncoderLastIndex,
+                      32);
+    for (uint32_t i = 0; i < kDigiLiveControlModeViewButtonCount; ++i) {
+        AddIndexedNumberProperty(properties,
+                                 "ProbeControlStateModeViewButton",
+                                 i + 1,
+                                 "Pressed",
+                                 gDigiLiveControlModeViewButtonPressed[i],
+                                 32);
+    }
+    for (uint32_t i = 0; i < kDigiLiveControlEncoderAssignButtonCount; ++i) {
+        AddIndexedNumberProperty(properties,
+                                 "ProbeControlStateEncoderAssignButton",
+                                 i + 1,
+                                 "Pressed",
+                                 gDigiLiveControlEncoderAssignButtonPressed[i],
+                                 32);
+    }
+    for (uint32_t i = 0; i < kDigiLiveControlRotaryEncoderCount; ++i) {
+        AddIndexedNumberProperty(properties,
+                                 "ProbeControlStateRotaryEncoder",
+                                 i + 1,
+                                 "Value",
+                                 gDigiLiveControlRotaryEncoderValue[i],
+                                 32);
+        AddIndexedNumberProperty(properties,
+                                 "ProbeControlStateRotaryEncoder",
+                                 i + 1,
+                                 "Direction",
+                                 gDigiLiveControlRotaryEncoderDirection[i],
+                                 32);
+        AddIndexedNumberProperty(properties,
+                                 "ProbeControlStateRotaryEncoder",
+                                 i + 1,
+                                 "Step",
+                                 gDigiLiveControlRotaryEncoderStep[i],
+                                 32);
+        AddIndexedNumberProperty(properties,
+                                 "ProbeControlStateRotaryEncoder",
+                                 i + 1,
+                                 "UpdateCount",
+                                 gDigiLiveControlRotaryEncoderUpdateCount[i],
+                                 64);
+    }
     AddNumberProperty(properties, "ProbeControlMotorTestEnabled", kDigiLiveControlMotorTestEnabled, 32);
     AddNumberProperty(properties,
                       "ProbeControlMotorTestTriggerCount",
@@ -1842,6 +1929,26 @@ bool
 QueueDigiLiveFaderMotorTarget(uint32_t channel, uint32_t target10);
 
 void
+DecodeDigiLiveRelativeEncoderValue(uint8_t value,
+                                   uint32_t * direction,
+                                   uint32_t * step)
+{
+    if (direction == nullptr || step == nullptr) {
+        return;
+    }
+    if (value > 0x40u) {
+        *direction = 1;
+        *step = value - 0x40u;
+    } else if (value < 0x40u) {
+        *direction = 2;
+        *step = 0x40u - value;
+    } else {
+        *direction = 0;
+        *step = 0;
+    }
+}
+
+void
 ObserveDigiLiveMappedControlState(uint32_t portNibble,
                                   uint8_t status,
                                   uint8_t data1,
@@ -1966,6 +2073,27 @@ ObserveDigiLiveMappedControlState(uint32_t portNibble,
             gDigiLiveControlLastMappedKind = kDigiLiveControlKindArrowDown;
             gDigiLiveControlLastMappedChannel = 0xffffffff;
             mapped = true;
+        } else if (noteGroup == kDigiLiveControlGroupModeView &&
+                   data1 >= kDigiLiveControlModeViewFirstNote &&
+                   data1 < kDigiLiveControlModeViewFirstNote + kDigiLiveControlModeViewButtonCount) {
+            uint32_t index = data1 - kDigiLiveControlModeViewFirstNote;
+            gDigiLiveControlModeViewButtonPressed[index] = pressed;
+            gDigiLiveControlModeViewLastNote = data1;
+            gDigiLiveControlModeViewLastIndex = index;
+            gDigiLiveControlModeViewUpdateCount++;
+            gDigiLiveControlLastMappedKind = kDigiLiveControlKindModeViewButton;
+            gDigiLiveControlLastMappedChannel = 0xffffffff;
+            mapped = true;
+        } else if (noteGroup == kDigiLiveControlGroupEncoderAssign &&
+                   data1 < kDigiLiveControlEncoderAssignButtonCount) {
+            uint32_t index = data1;
+            gDigiLiveControlEncoderAssignButtonPressed[index] = pressed;
+            gDigiLiveControlEncoderAssignLastNote = data1;
+            gDigiLiveControlEncoderAssignLastIndex = index;
+            gDigiLiveControlEncoderAssignUpdateCount++;
+            gDigiLiveControlLastMappedKind = kDigiLiveControlKindEncoderAssignButton;
+            gDigiLiveControlLastMappedChannel = 0xffffffff;
+            mapped = true;
         }
     } else if (command == 0xb0u) {
         if (data1 <= 0x3fu) {
@@ -1983,18 +2111,23 @@ ObserveDigiLiveMappedControlState(uint32_t portNibble,
                 }
                 mapped = true;
             }
+        } else if (data1 >= kDigiLiveControlCCRotaryEncoderFirst &&
+                   data1 < kDigiLiveControlCCRotaryEncoderFirst + kDigiLiveControlRotaryEncoderCount) {
+            uint32_t index = data1 - kDigiLiveControlCCRotaryEncoderFirst;
+            gDigiLiveControlRotaryEncoderValue[index] = data2;
+            DecodeDigiLiveRelativeEncoderValue(data2,
+                                               &gDigiLiveControlRotaryEncoderDirection[index],
+                                               &gDigiLiveControlRotaryEncoderStep[index]);
+            gDigiLiveControlRotaryEncoderUpdateCount[index]++;
+            gDigiLiveControlRotaryEncoderLastIndex = index;
+            gDigiLiveControlLastMappedKind = kDigiLiveControlKindRotaryEncoder;
+            gDigiLiveControlLastMappedChannel = 0xffffffff;
+            mapped = true;
         } else if (data1 == kDigiLiveControlCCJogWheel) {
             gDigiLiveControlJogWheelValue = data2;
-            if (data2 > 0x40u) {
-                gDigiLiveControlJogWheelDirection = 1;
-                gDigiLiveControlJogWheelStep = data2 - 0x40u;
-            } else if (data2 < 0x40u) {
-                gDigiLiveControlJogWheelDirection = 2;
-                gDigiLiveControlJogWheelStep = 0x40u - data2;
-            } else {
-                gDigiLiveControlJogWheelDirection = 0;
-                gDigiLiveControlJogWheelStep = 0;
-            }
+            DecodeDigiLiveRelativeEncoderValue(data2,
+                                               &gDigiLiveControlJogWheelDirection,
+                                               &gDigiLiveControlJogWheelStep);
             gDigiLiveControlJogWheelUpdateCount++;
             gDigiLiveControlLastMappedKind = kDigiLiveControlKindJogWheel;
             gDigiLiveControlLastMappedChannel = 0xffffffff;
@@ -2949,6 +3082,70 @@ PublishAudioRuntimeDiagnostics()
                       "ProbeControlStateShuttleUpdateCount",
                       gDigiLiveControlShuttleUpdateCount,
                       64);
+    AddNumberProperty(properties, "ProbeControlStateModeViewLastNote", gDigiLiveControlModeViewLastNote, 32);
+    AddNumberProperty(properties, "ProbeControlStateModeViewLastIndex", gDigiLiveControlModeViewLastIndex, 32);
+    AddNumberProperty(properties,
+                      "ProbeControlStateModeViewUpdateCount",
+                      gDigiLiveControlModeViewUpdateCount,
+                      64);
+    AddNumberProperty(properties,
+                      "ProbeControlStateEncoderAssignLastNote",
+                      gDigiLiveControlEncoderAssignLastNote,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeControlStateEncoderAssignLastIndex",
+                      gDigiLiveControlEncoderAssignLastIndex,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeControlStateEncoderAssignUpdateCount",
+                      gDigiLiveControlEncoderAssignUpdateCount,
+                      64);
+    AddNumberProperty(properties,
+                      "ProbeControlStateRotaryEncoderLastIndex",
+                      gDigiLiveControlRotaryEncoderLastIndex,
+                      32);
+    for (uint32_t i = 0; i < kDigiLiveControlModeViewButtonCount; ++i) {
+        AddIndexedNumberProperty(properties,
+                                 "ProbeControlStateModeViewButton",
+                                 i + 1,
+                                 "Pressed",
+                                 gDigiLiveControlModeViewButtonPressed[i],
+                                 32);
+    }
+    for (uint32_t i = 0; i < kDigiLiveControlEncoderAssignButtonCount; ++i) {
+        AddIndexedNumberProperty(properties,
+                                 "ProbeControlStateEncoderAssignButton",
+                                 i + 1,
+                                 "Pressed",
+                                 gDigiLiveControlEncoderAssignButtonPressed[i],
+                                 32);
+    }
+    for (uint32_t i = 0; i < kDigiLiveControlRotaryEncoderCount; ++i) {
+        AddIndexedNumberProperty(properties,
+                                 "ProbeControlStateRotaryEncoder",
+                                 i + 1,
+                                 "Value",
+                                 gDigiLiveControlRotaryEncoderValue[i],
+                                 32);
+        AddIndexedNumberProperty(properties,
+                                 "ProbeControlStateRotaryEncoder",
+                                 i + 1,
+                                 "Direction",
+                                 gDigiLiveControlRotaryEncoderDirection[i],
+                                 32);
+        AddIndexedNumberProperty(properties,
+                                 "ProbeControlStateRotaryEncoder",
+                                 i + 1,
+                                 "Step",
+                                 gDigiLiveControlRotaryEncoderStep[i],
+                                 32);
+        AddIndexedNumberProperty(properties,
+                                 "ProbeControlStateRotaryEncoder",
+                                 i + 1,
+                                 "UpdateCount",
+                                 gDigiLiveControlRotaryEncoderUpdateCount[i],
+                                 64);
+    }
     AddNumberProperty(properties, "ProbeControlMotorTestEnabled", kDigiLiveControlMotorTestEnabled, 32);
     AddNumberProperty(properties,
                       "ProbeControlMotorTestTriggerCount",
@@ -4571,6 +4768,25 @@ ConfigureAudioDevice(FireWireOHCIProbe * driver)
     gDigiLiveControlJogWheelUpdateCount = 0;
     gDigiLiveControlShuttleValue = 0;
     gDigiLiveControlShuttleUpdateCount = 0;
+    for (uint32_t i = 0; i < kDigiLiveControlModeViewButtonCount; ++i) {
+        gDigiLiveControlModeViewButtonPressed[i] = 0;
+    }
+    gDigiLiveControlModeViewLastNote = 0xffffffff;
+    gDigiLiveControlModeViewLastIndex = 0xffffffff;
+    gDigiLiveControlModeViewUpdateCount = 0;
+    for (uint32_t i = 0; i < kDigiLiveControlEncoderAssignButtonCount; ++i) {
+        gDigiLiveControlEncoderAssignButtonPressed[i] = 0;
+    }
+    gDigiLiveControlEncoderAssignLastNote = 0xffffffff;
+    gDigiLiveControlEncoderAssignLastIndex = 0xffffffff;
+    gDigiLiveControlEncoderAssignUpdateCount = 0;
+    for (uint32_t i = 0; i < kDigiLiveControlRotaryEncoderCount; ++i) {
+        gDigiLiveControlRotaryEncoderValue[i] = 0;
+        gDigiLiveControlRotaryEncoderDirection[i] = 0;
+        gDigiLiveControlRotaryEncoderStep[i] = 0;
+        gDigiLiveControlRotaryEncoderUpdateCount[i] = 0;
+    }
+    gDigiLiveControlRotaryEncoderLastIndex = 0xffffffff;
     gDigiLiveControlMotorTestTriggerCount = 0;
     gDigiLiveControlMotorTestMessageCount = 0;
     gDigiLiveControlMotorTestSkippedCount = 0;
