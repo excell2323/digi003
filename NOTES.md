@@ -8,7 +8,7 @@ Current active local version:
 
 - Driver: `com.axelheckert.driver.FireWireOHCIProbe`
 - Host app: `com.axelheckert.FireWireOHCIProbeLoader`
-- Version: `0.2.55/255`
+- Version: `0.2.63/263`
 - Team ID used locally: `7H3ND356AV`
 - Controller: `pci11c1,5901` / IEEE 1394 Open HCI
 
@@ -172,6 +172,193 @@ Interpretation:
 
 This is a meaningful improvement over the 0.2.51 baseline repeated-frame count (`67524` vs `73850`), and it proves the Linux sequence-replay idea is relevant on macOS too. It is not enough yet: DBC/cycle loss remains high, so the next step should be a true moving replay queue like Linux uses, not just a single 80-packet prebuffer-period replay.
 
+### 0.2.56 moving replay queue experiment
+
+This build keeps the 0.2.55 prebuffer-period replay, then continues with a Linux-style moving replay queue while the live stream is running.
+
+Implementation notes:
+
+```text
+moving replay queue                 = 512 RX packets
+update size                         = 80 TX packets
+required update total               = 441 data blocks at 44.1 kHz
+TX update lead                      = 512 packets ahead of current OHCI IT command pointer
+TX update method                    = rewrite future packet lengths/CIP DBC/header only
+payload layout                      = unchanged fixed 6-data-block stride
+```
+
+The goal is to test whether the Digi 003 wants a continuously refreshed TX packet cadence rather than one static captured period. The update is intentionally conservative: it only commits an 80-packet update when the queued RX packet count totals exactly 441 data blocks, so the following packet's DBC phase stays compatible with the existing TX ring.
+
+New diagnostics are exposed as `ProbeDigiLiveSequenceReplayMoving*` properties, including queue fill, update success count, bad-total count, bad command-pointer count, last update start index, and last sync return.
+
+First test result:
+
+```text
+Captures/coreaudio-digi003-test-0.2.56-movingreplay-3s.wav
+repeated_frames=83140
+unique_frames=775
+sequence_replay_ready=1
+sequence_replay_active=0
+sequence_replay_apply_attempts=0
+moving_append_count=0
+```
+
+Interpretation:
+
+This did not exercise moving replay. The prebuffer loop could reach the target ring fill before it had applied the captured 80-packet replay period, then recording continued with replay inactive. Version 0.2.57 keeps prebuffer harvesting while sequence replay is still pending, even if the audio ring is already above the normal prebuffer target.
+
+### 0.2.57 prebuffer replay gate fix
+
+This build keeps the 0.2.56 moving replay implementation and changes only the prebuffer gate: the loop now exits on ring-fill target only after the first 80-packet replay has either been applied or an apply attempt has failed. This should force the actual moving-replay experiment to run.
+
+Test result:
+
+```text
+Captures/coreaudio-digi003-test-0.2.57-prebuffergate-movingreplay-3s.wav
+repeated_frames=90789
+unique_frames=775
+sequence_replay_ready=0
+sequence_replay_period_count=23
+sequence_replay_apply_attempts=0
+moving_append_count=0
+```
+
+Interpretation:
+
+The prebuffer gate fix worked structurally, but the replay capture was still too strict: it discarded the captured 5/6 cadence whenever RX DBC/cycle continuity was lost. Because DBC/cycle discontinuity is the defect we are trying to compensate for, using it as a hard prerequisite prevents the experiment from running on unstable captures.
+
+### 0.2.58 relaxed replay capture continuity
+
+This build keeps counting RX discontinuities but no longer discards initial or moving replay candidates solely because of DBC/cycle loss. It still rejects invalid data-block counts and still requires each moving 80-packet update to total exactly 441 data blocks at 44.1 kHz.
+
+Test result:
+
+```text
+Captures/coreaudio-digi003-test-0.2.58-relaxed-movingreplay-3s.wav
+repeated_frames=123338
+unique_frames=140
+sequence_replay_active=1
+sequence_replay_observed_total_data_blocks=439
+moving_update_success_count=2
+moving_bad_total_count=32
+moving_bad_command_ptr_count=78
+```
+
+Interpretation:
+
+This finally exercised the replay path, but it also proved that relaxed continuity alone is unsafe: the initial static replay period totalled 439 data blocks instead of 441, so it poisoned the TX clock cadence before the moving queue could help.
+
+### 0.2.59 require valid initial replay total
+
+This build still relaxes continuity, but it only marks the initial 80-packet replay period ready when the total is exactly 441 data blocks. Bad initial periods are counted as `ProbeDigiLiveSequenceReplayBadTotalCount` with the last bad total published as `ProbeDigiLiveSequenceReplayLastBadTotalDataBlocks`.
+
+Test result:
+
+```text
+Captures/coreaudio-digi003-test-0.2.59-validtotal-movingreplay-3s.wav
+repeated_frames=124106
+unique_frames=129
+sequence_replay_active=1
+sequence_replay_observed_total_data_blocks=441
+moving_update_success_count=5
+moving_bad_total_count=29
+moving_bad_command_ptr_count=50
+```
+
+Interpretation:
+
+The initial replay total was valid, but the capture was still much worse than 0.2.55. The moving update path is now the main suspect: on-the-fly descriptor/header rewriting while OHCI IT is running can leave the command pointer unreadable or the transmit context unstable.
+
+### 0.2.60 static replay isolation
+
+This build keeps the 0.2.59 valid-total initial replay gate, but disables moving replay updates (`ProbeDigiLiveSequenceReplayMovingEnabled = 0`). It is an isolation run to confirm whether the running TX-ring rewrite is the regression.
+
+Test result:
+
+```text
+Captures/coreaudio-digi003-test-0.2.60-static-validtotal-nomoving-3s.wav
+repeated_frames=66794
+unique_frames=1095
+sequence_replay_active=1
+sequence_replay_observed_total_data_blocks=441
+moving_enabled=0
+```
+
+Interpretation:
+
+Static valid-total replay is stable again and slightly better than 0.2.55. This confirms that the running TX-ring rewrite was the regression; the next experiments should focus on RX harvesting/ring shape rather than changing live transmit descriptors.
+
+### 0.2.61 ASFireWire-style receive ring experiment
+
+This build keeps 0.2.60 static valid-total replay and switches the live IR receive path to one `INPUT_LAST` descriptor per packet. The descriptor receives the OHCI isochronous header plus payload in one contiguous packet buffer (`ProbeDigiLiveSingleDescriptorReceiveEnabled = 1`). This is a clean-room architectural test inspired by ASFireWire's receive-ring shape; no ASFireWire source code is copied.
+
+Test result:
+
+```text
+Captures/coreaudio-digi003-test-0.2.61-singleir-asfwstyle-3s.wav
+repeated_frames=81418
+unique_frames=882
+single_descriptor_receive_enabled=1
+sequence_replay_active=1
+sequence_replay_observed_total_data_blocks=441
+harvest_packet_count=10681
+rx_dbc_lost_count=1224
+rx_cycle_lost_count=1183
+```
+
+Interpretation:
+
+The single-descriptor IR shape is worse than the 0.2.60 split-header/payload receive ring. It receives valid 5/6 data-block packets, but harvest throughput drops and repeated frames rise sharply. The useful clue is not the descriptor shape itself, but the command pointer: the hardware IR command pointer can run ahead while the software read index waits on an empty descriptor, implying a late-drain/lost-position problem.
+
+### 0.2.62 command-pointer catch-up experiment
+
+This build returns to the 0.2.60 split-header/payload receive descriptors (`ProbeDigiLiveSingleDescriptorReceiveEnabled = 0`) and adds an IR command-pointer cursor. When the harvester sees an empty descriptor but the OHCI IR command pointer says hardware has advanced by at least eight packets, the software read index jumps forward to the hardware command pointer instead of waiting for the next full ring wrap.
+
+Test result:
+
+```text
+Captures/coreaudio-digi003-test-0.2.62-cmdptr-catchup-3s.wav
+repeated_frames=47457
+unique_frames=1352
+single_descriptor_receive_enabled=0
+catch_up_count=629
+catch_up_skipped_packets=11178
+harvest_packet_count=19652
+harvest_frame_count=108350
+ring_repeated_frames=39939
+```
+
+Interpretation:
+
+This is the first large improvement in the live CoreAudio path. Command-pointer catch-up prevents the harvester from waiting for another full ring wrap after it lands on an already-missed empty descriptor. It still skips many packets, so the next refinement is to scan forward for the next filled descriptor before jumping all the way to the hardware command pointer.
+
+### 0.2.63 catch-up scan experiment
+
+This build keeps the 0.2.62 command-pointer cursor, but changes empty-descriptor recovery from a blind jump into a scan. On an empty descriptor, the harvester scans forward up to 256 packets and resumes at the first non-empty descriptor it finds; only if no filled descriptor is found does it jump to the hardware command pointer.
+
+Test result:
+
+```text
+Captures/coreaudio-digi003-test-0.2.63-cmdptr-catchup-scan-3s.wav
+repeated_frames=4975
+unique_frames=2049
+ring_repeated_frames=1161
+harvest_packet_count=24473
+harvest_frame_count=134926
+catch_up_count=1548
+catch_up_scan_found_count=1548
+catch_up_skipped_packets=1885
+empty_poll_count=0
+
+Captures/coreaudio-digi003-test-0.2.63-cmdptr-catchup-scan-run2-3s.wav
+repeated_frames=5483
+unique_frames=2043
+```
+
+Interpretation:
+
+This is the new best live CoreAudio capture by a large margin. The harvester now stays close to the expected 44.1 kHz frame rate, and scanning recovers many descriptors that the blind 0.2.62 jump would have skipped. Remaining repeat frames are now small enough that the next work should focus on tighter ring/backpressure behavior and the remaining RX DBC/cycle discontinuities rather than wholesale receive-ring redesign.
+
 ## Stream Format References
 
 - Robin Gareus, "Reverse engineering the Digidesign 003R protocol": https://gareus.org/wiki/digi003
@@ -205,7 +392,7 @@ monitor source stride                = 8
 
 ## Next Work
 
-1. Move from the 0.2.55 static 80-packet replay to a Linux-style moving replay queue.
-2. Reduce RX ring late-drain behavior until DBC/cycle lost counts approach zero.
+1. Tune 0.2.63 catch-up/backpressure to reduce the remaining small underrun/repeat count.
+2. Reduce RX DBC/cycle lost counts now that harvest throughput is near real-time.
 3. Add Digi "double-oh-three" playback encoding before enabling non-silent output.
 4. Add MIDI/control-surface and mixer/control support after audio input stability improves.
