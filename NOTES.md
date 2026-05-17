@@ -1843,6 +1843,32 @@ Confirmed locally:
 `Tools/decode-control-ring.py` decodes `ProbeControlRecentRawWordsBE` from
 IORegistry into slot-0 words and reconstructed MIDI messages.
 
+## 0.2.160 Decoded Control Messages
+
+Adds a first stateful control parser on top of the raw slot-0 fragments. The
+driver now reconstructs 3-byte MIDI/control messages per port and publishes the
+decoded recent-message ring as `ProbeControlDecodedRecentMessages` with
+`ProbeControlDecoded*` counters for note/button and control-change traffic.
+
+The experimental slot-0 feedback path remains enabled, but the echo queue is
+now limited to non-zero control ports so external physical MIDI traffic is not
+mirrored back accidentally. `Tools/decode-control-ring.py` now prints both its
+own reconstructed view and the driver-decoded MIDI view.
+
+Confirmed locally:
+
+- SELECT 1 decodes as `90 00 40` on press and `90 00 00` on release.
+- Fader 1 touch/release decodes as `90 03 40` and `90 03 00`.
+- A Fader 1 move decoded 73 MIDI/control messages from 146 slot-0 fragments:
+  67 control changes and 6 note/button messages.
+- Driver-decoded messages matched the userspace reconstruction from
+  `Tools/decode-control-ring.py`.
+- During the test the feedback queue transmitted all 146 queued fragments with
+  `0` drops and the audio output counters stayed clean:
+  `ProbeAudioRuntimeOutputRingUnderrunFrames=0`,
+  `ProbeAudioRuntimeOutputRingOverrunFrames=0`, and
+  `ProbeDigiLiveOutputCursorCatchUpCount=0`.
+
 ## Async Control Reference
 
 The Rust `firewire-digi00x-protocols` crate is supplemental runtime code for internal functions outside the isochronous packet stream. It is useful for later mixer/control-surface work, but it does not solve the current live RX harvest issue.

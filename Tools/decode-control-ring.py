@@ -21,8 +21,8 @@ def parse_number(text, key, default=0):
     return int(match.group(1))
 
 
-def parse_words(text):
-    data = re.search(r'"ProbeControlRecentRawWordsBE" = <([0-9a-fA-F\s]+)>', text)
+def parse_data_words(text, key):
+    data = re.search(rf'"{re.escape(key)}" = <([0-9a-fA-F\s]+)>', text)
     if data is not None:
         hex_bytes = re.sub(r"\s+", "", data.group(1))
         raw = bytes.fromhex(hex_bytes)
@@ -31,6 +31,13 @@ def parse_words(text):
             for i in range(0, len(raw), 4)
             if i + 4 <= len(raw)
         ]
+    return []
+
+
+def parse_words(text):
+    words = parse_data_words(text, "ProbeControlRecentRawWordsBE")
+    if words:
+        return words
 
     indexed = {}
     for match in re.finditer(r'"ProbeControlRecentRawWord([0-9]+)BE" = ([0-9]+)', text):
@@ -49,49 +56,92 @@ def bytes_for_word(word):
     )
 
 
+def ordered_ring_items(items, index, count):
+    count = min(count, len(items))
+    if count == len(items):
+        order = list(range(index, len(items))) + list(range(0, index))
+    else:
+        order = list(range(0, count))
+    return [(i, items[i]) for i in order if items[i] != 0]
+
+
+def midi_bytes_for_word(word):
+    _marker, data0, data1, control = bytes_for_word(word)
+    length = control & 0x0F
+    result = []
+    if length >= 1:
+        result.append(data0)
+    if length >= 2:
+        result.append(data1)
+    return (control >> 4) & 0x0F, result
+
+
+def append_decoded_byte(pending_by_port, port, byte):
+    pending = pending_by_port.setdefault(port, [])
+    if byte & 0x80:
+        pending[:] = [byte]
+        return None
+    if not pending:
+        return None
+    pending.append(byte)
+    if len(pending) < 3:
+        return None
+    msg = pending[:3]
+    del pending[:]
+    return msg
+
+
 def main():
     text = read_ioreg()
     message_count = parse_number(text, "ProbeControlMessageCount")
     recent_index = parse_number(text, "ProbeControlRecentIndex")
     recent_count = parse_number(text, "ProbeControlRecentCount")
+    decoded_count = parse_number(text, "ProbeControlDecodedMessageCount")
+    decoded_index = parse_number(text, "ProbeControlDecodedRecentIndex")
+    decoded_recent_count = parse_number(text, "ProbeControlDecodedRecentCount")
     words = parse_words(text)
+    decoded_words = parse_data_words(text, "ProbeControlDecodedRecentMessages")
     if not words:
         print("No ProbeControl recent words found", file=sys.stderr)
         return 1
 
-    count = min(recent_count, len(words))
-    if count == len(words):
-        order = list(range(recent_index, len(words))) + list(range(0, recent_index))
-    else:
-        order = list(range(0, count))
-
-    active_words = [words[i] for i in order if words[i] != 0]
+    ordered_words = ordered_ring_items(words, recent_index, recent_count)
+    active_words = [word for _idx, word in ordered_words]
     print(f"message_count={message_count} recent_index={recent_index} recent_count={recent_count}")
+    print(
+        f"decoded_count={decoded_count} "
+        f"decoded_index={decoded_index} decoded_recent_count={decoded_recent_count}"
+    )
     print(f"active_words={len(active_words)}")
 
     print("words:")
-    for idx, word in [(i, words[i]) for i in order if words[i] != 0]:
+    for idx, word in ordered_words:
         b0, b1, b2, b3 = bytes_for_word(word)
         print(
             f"  slot={idx:03d} raw=0x{word:08X} bytes={b0:02X} {b1:02X} {b2:02X} {b3:02X} "
             f"port={b3 >> 4:X} len={b3 & 0x0F}"
         )
 
-    print("midi:")
-    pending = []
+    print("reconstructed_midi:")
+    pending_by_port = {}
     for word in active_words:
-        _marker, data0, data1, control = bytes_for_word(word)
-        length = control & 0x0F
-        if length >= 1:
-            pending.append(data0)
-        if length >= 2:
-            pending.append(data1)
-        while len(pending) >= 3:
-            msg = pending[:3]
-            del pending[:3]
-            print("  " + " ".join(f"{byte:02X}" for byte in msg))
-    if pending:
-        print("  pending " + " ".join(f"{byte:02X}" for byte in pending))
+        port, payload = midi_bytes_for_word(word)
+        for byte in payload:
+            msg = append_decoded_byte(pending_by_port, port, byte)
+            if msg is not None:
+                print(f"  port={port:X} " + " ".join(f"{byte:02X}" for byte in msg))
+    for port, pending in sorted(pending_by_port.items()):
+        if pending:
+            print(f"  port={port:X} pending " + " ".join(f"{byte:02X}" for byte in pending))
+
+    if decoded_words:
+        print("driver_decoded_midi:")
+        for _idx, message in ordered_ring_items(decoded_words, decoded_index, decoded_recent_count):
+            port = (message >> 24) & 0x0F
+            status = (message >> 16) & 0xFF
+            data1 = (message >> 8) & 0xFF
+            data2 = message & 0xFF
+            print(f"  port={port:X} {status:02X} {data1:02X} {data2:02X}")
 
     return 0
 
