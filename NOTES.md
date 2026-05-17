@@ -1125,6 +1125,41 @@ ProbeAudioRuntimeRingUnderrunFrames=0
 ProbeDigiLiveSequenceReplayMovingEnabled=0
 ```
 
+### 0.2.130 moving sequence replay dry-run
+
+Enabled the moving replay queue in dry-run mode only. The driver now queues RX
+data-block counts, validates 80-packet update windows, reads the live IT command
+pointer, calculates the future update start and DBC range, and consumes valid dry-run
+windows. It does not rewrite TX descriptors, sync TX DMA ranges, or wake the IT
+context.
+
+```text
+Captures/coreaudio-digi003-test-0.2.130-moving-dryrun-10s.wav
+after_1s_repeated_frames=0
+after_2s_repeated_frames=0
+last_5s_repeated_frames=0
+ProbeAudioRuntimeRingUnderrunFrames=0
+ProbeDigiLiveSequenceReplayMovingDryRunSuccessCount=196
+ProbeDigiLiveSequenceReplayMovingDryRunPacketCount=15680
+ProbeDigiLiveSequenceReplayMovingBadCommandPtrCount=0
+ProbeDigiLiveSequenceReplayMovingBadTotalCount=467
+ProbeDigiLiveSequenceReplayMovingInvalidCount=760
+ProbeDigiLiveSequenceReplayMovingLastTotalDataBlocks=439
+ProbeDigiLiveSequenceReplayMovingLastCurrentPacketIndex=9488
+ProbeDigiLiveSequenceReplayMovingLastUpdateStartIndex=10000
+ProbeDigiLiveSequenceReplayMovingLastStartDBC=85
+ProbeDigiLiveSequenceReplayMovingLastEndDBC=14
+```
+
+Interpretation:
+
+The dry-run does not destabilize the 10-second input path, and the earlier moving
+replay command-pointer failure is not reproduced when no live descriptor rewrite is
+performed. The remaining blocker is the replay source sequence: raw RX windows are
+often invalid or total 439 instead of 441 data blocks. The next replay step should
+derive a phase-aligned 80-packet sequence from the validated RX cadence diagnostics
+instead of blindly consuming every raw moving queue window.
+
 ## Local Automation Notes
 
 A narrow local sudoers rule is installed at `/etc/sudoers.d/firewire-ohci-probe` so Codex can continue DriverKit upgrade loops without repeated password prompts. It permits only:

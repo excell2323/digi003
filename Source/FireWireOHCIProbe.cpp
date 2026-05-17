@@ -294,7 +294,8 @@ constexpr uint32_t kDigiLivePrebufferAttemptCount = 2000;
 constexpr uint32_t kDigiLiveSequenceReplayEnabled = 0;
 constexpr uint32_t kDigiLiveSequenceReplayPeriodPackets = 80;
 constexpr uint32_t kDigiLiveSequenceReplayRequireContinuity = 0;
-constexpr uint32_t kDigiLiveSequenceReplayMovingEnabled = 0;
+constexpr uint32_t kDigiLiveSequenceReplayMovingEnabled = 1;
+constexpr uint32_t kDigiLiveSequenceReplayMovingDryRunEnabled = 1;
 constexpr uint32_t kDigiLiveSequenceReplayMovingRequireContinuity = 0;
 constexpr uint32_t kDigiLiveSequenceReplayMovingQueuePackets = 512;
 constexpr uint32_t kDigiLiveSequenceReplayMovingUpdatePackets = 80;
@@ -1236,6 +1237,8 @@ uint64_t gDigiLiveSequenceReplayMovingInvalidCount = 0;
 uint64_t gDigiLiveSequenceReplayMovingUpdateAttemptCount = 0;
 uint64_t gDigiLiveSequenceReplayMovingUpdateSuccessCount = 0;
 uint64_t gDigiLiveSequenceReplayMovingUpdatePacketCount = 0;
+uint64_t gDigiLiveSequenceReplayMovingDryRunSuccessCount = 0;
+uint64_t gDigiLiveSequenceReplayMovingDryRunPacketCount = 0;
 uint64_t gDigiLiveSequenceReplayMovingShortQueueCount = 0;
 uint64_t gDigiLiveSequenceReplayMovingBadTotalCount = 0;
 uint64_t gDigiLiveSequenceReplayMovingBadCommandPtrCount = 0;
@@ -1243,6 +1246,8 @@ uint32_t gDigiLiveSequenceReplayMovingLastCurrentPacketIndex = 0xffffffff;
 uint32_t gDigiLiveSequenceReplayMovingLastUpdateStartIndex = 0xffffffff;
 uint32_t gDigiLiveSequenceReplayMovingLastUpdatePackets = 0;
 uint32_t gDigiLiveSequenceReplayMovingLastTotalDataBlocks = 0;
+uint32_t gDigiLiveSequenceReplayMovingLastStartDBC = 0;
+uint32_t gDigiLiveSequenceReplayMovingLastEndDBC = 0;
 uint32_t gDigiLiveSequenceReplayMovingLastSyncRet = static_cast<uint32_t>(kIOReturnNotReady);
 uint32_t gAudioInputCallbackCount = 0;
 uint32_t gAudioInputLastBufferFrameSize = 0;
@@ -2174,6 +2179,10 @@ PublishAudioRuntimeDiagnostics()
                       kDigiLiveSequenceReplayMovingEnabled,
                       32);
     AddNumberProperty(properties,
+                      "ProbeDigiLiveSequenceReplayMovingDryRunEnabled",
+                      kDigiLiveSequenceReplayMovingDryRunEnabled,
+                      32);
+    AddNumberProperty(properties,
                       "ProbeDigiLiveSequenceReplayMovingRequireContinuity",
                       kDigiLiveSequenceReplayMovingRequireContinuity,
                       32);
@@ -2238,6 +2247,14 @@ PublishAudioRuntimeDiagnostics()
                       gDigiLiveSequenceReplayMovingUpdatePacketCount,
                       64);
     AddNumberProperty(properties,
+                      "ProbeDigiLiveSequenceReplayMovingDryRunSuccessCount",
+                      gDigiLiveSequenceReplayMovingDryRunSuccessCount,
+                      64);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveSequenceReplayMovingDryRunPacketCount",
+                      gDigiLiveSequenceReplayMovingDryRunPacketCount,
+                      64);
+    AddNumberProperty(properties,
                       "ProbeDigiLiveSequenceReplayMovingShortQueueCount",
                       gDigiLiveSequenceReplayMovingShortQueueCount,
                       64);
@@ -2264,6 +2281,14 @@ PublishAudioRuntimeDiagnostics()
     AddNumberProperty(properties,
                       "ProbeDigiLiveSequenceReplayMovingLastTotalDataBlocks",
                       gDigiLiveSequenceReplayMovingLastTotalDataBlocks,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveSequenceReplayMovingLastStartDBC",
+                      gDigiLiveSequenceReplayMovingLastStartDBC,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveSequenceReplayMovingLastEndDBC",
+                      gDigiLiveSequenceReplayMovingLastEndDBC,
                       32);
     AddNumberProperty(properties,
                       "ProbeDigiLiveSequenceReplayMovingLastSyncRet",
@@ -4768,6 +4793,8 @@ ResetDigiLiveSequenceReplayState()
     gDigiLiveSequenceReplayMovingUpdateAttemptCount = 0;
     gDigiLiveSequenceReplayMovingUpdateSuccessCount = 0;
     gDigiLiveSequenceReplayMovingUpdatePacketCount = 0;
+    gDigiLiveSequenceReplayMovingDryRunSuccessCount = 0;
+    gDigiLiveSequenceReplayMovingDryRunPacketCount = 0;
     gDigiLiveSequenceReplayMovingShortQueueCount = 0;
     gDigiLiveSequenceReplayMovingBadTotalCount = 0;
     gDigiLiveSequenceReplayMovingBadCommandPtrCount = 0;
@@ -4775,6 +4802,8 @@ ResetDigiLiveSequenceReplayState()
     gDigiLiveSequenceReplayMovingLastUpdateStartIndex = 0xffffffff;
     gDigiLiveSequenceReplayMovingLastUpdatePackets = 0;
     gDigiLiveSequenceReplayMovingLastTotalDataBlocks = 0;
+    gDigiLiveSequenceReplayMovingLastStartDBC = 0;
+    gDigiLiveSequenceReplayMovingLastEndDBC = 0;
     gDigiLiveSequenceReplayMovingLastSyncRet = ReturnCodeToProperty(kIOReturnNotReady);
     gDigiLiveSourceNodeIDField = 0;
 }
@@ -5374,6 +5403,7 @@ RefreshDigiLiveMovingSequenceReplay()
         (currentPacketIndex + kDigiLiveSequenceReplayMovingLeadPackets) %
         kDigi00xDuplexITPacketCount;
     uint32_t dataBlockCounter = DigiLiveTransmitDBCForPacket(itHeaderStorage, updateStart);
+    gDigiLiveSequenceReplayMovingLastStartDBC = dataBlockCounter;
 
     gDigiLiveSequenceReplayMovingLastCurrentPacketIndex = currentPacketIndex;
     gDigiLiveSequenceReplayMovingLastUpdateStartIndex = updateStart;
@@ -5390,13 +5420,23 @@ RefreshDigiLiveMovingSequenceReplay()
             return kIOReturnBadArgument;
         }
 
-        UpdateDigiLiveTransmitPacketDescriptor(itDescriptor,
-                                               itHeaderStorage,
-                                               packetIndex,
-                                               dataBlocks,
-                                               gDigiLiveSourceNodeIDField,
-                                               dataBlockCounter);
+        if (kDigiLiveSequenceReplayMovingDryRunEnabled == 0) {
+            UpdateDigiLiveTransmitPacketDescriptor(itDescriptor,
+                                                   itHeaderStorage,
+                                                   packetIndex,
+                                                   dataBlocks,
+                                                   gDigiLiveSourceNodeIDField,
+                                                   dataBlockCounter);
+        }
         dataBlockCounter = (dataBlockCounter + dataBlocks) & 0xffu;
+    }
+    gDigiLiveSequenceReplayMovingLastEndDBC = dataBlockCounter;
+
+    if (kDigiLiveSequenceReplayMovingDryRunEnabled != 0) {
+        gDigiLiveSequenceReplayMovingDryRunSuccessCount++;
+        gDigiLiveSequenceReplayMovingDryRunPacketCount += kDigiLiveSequenceReplayMovingUpdatePackets;
+        gDigiLiveSequenceReplayMovingLastSyncRet = ReturnCodeToProperty(kIOReturnSuccess);
+        return kIOReturnSuccess;
     }
 
     __sync_synchronize();
