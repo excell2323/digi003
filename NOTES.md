@@ -8,7 +8,7 @@ Current active local version:
 
 - Driver: `com.axelheckert.driver.FireWireOHCIProbe`
 - Host app: `com.axelheckert.FireWireOHCIProbeLoader`
-- Version: `0.2.106/306`
+- Version: `0.2.108/308`
 - Team ID used locally: `7H3ND356AV`
 - Controller: `pci11c1,5901` / IEEE 1394 Open HCI
 
@@ -677,6 +677,36 @@ Updating future TX descriptors while running is still conceptually the right Lin
 
 ```text
 Captures/coreaudio-digi003-test-0.2.106-restored-after-moving-10s.wav
+after_1s_repeated_frames=0
+last_5s_repeated_frames=0
+```
+
+### 0.2.107 worker-only harvest rejection
+
+This disabled Core Audio callback harvesting (`kAudioCallbackHarvestEnabled = 0`) and left only the background worker draining live RX packets.
+
+```text
+Captures/coreaudio-digi003-test-0.2.107-worker-only-10s.wav
+after_1s_repeated_frames=0
+last_5s_repeated_frames=0
+drain_busy_count=0
+
+Captures/coreaudio-digi003-test-0.2.107-worker-only-30s.wav
+total_repeated_frames=75342
+after_1s_repeated_frames=68887
+last_10s_repeated_frames=37079
+last_5s_repeated_frames=19131
+drain_busy_count=0
+```
+
+Interpretation:
+
+Removing callback harvest eliminates worker/callback contention, but it does not improve the long-run capture quality. It is slightly worse than the callback-enabled baseline in total repeats and final 5 seconds. Version 0.2.108 restores callback harvest.
+
+0.2.108 control capture:
+
+```text
+Captures/coreaudio-digi003-test-0.2.108-restored-after-worker-only-10s.wav
 after_1s_repeated_frames=0
 last_5s_repeated_frames=0
 ```
