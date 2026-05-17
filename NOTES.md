@@ -1637,6 +1637,8 @@ Validation:
 - Direct listening: 440 Hz playback sounds correct.
 - Real macOS music playback with `Digi 003 FireWire` selected as the system
   output device sounds clean, including normal playback controls.
+- Local music-file playback was tested after a single Apple Music drop and did
+  not reproduce drops; output underrun/overrun counters remained at `0`.
 - Concurrent loopback capture:
   `Captures/coreaudio-digi003-loopback-0.2.149-concurrent-fade-10s.wav`.
 - Capture peak on input 1: about `1,026,476`.
