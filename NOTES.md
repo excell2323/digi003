@@ -8,7 +8,7 @@ Current active local version:
 
 - Driver: `com.axelheckert.driver.FireWireOHCIProbe`
 - Host app: `com.axelheckert.FireWireOHCIProbeLoader`
-- Version: `0.2.98/298`
+- Version: `0.2.100/300`
 - Team ID used locally: `7H3ND356AV`
 - Controller: `pci11c1,5901` / IEEE 1394 Open HCI
 
@@ -577,6 +577,18 @@ Rejected experiments:
 
 - `0.2.94`: 3072 IR descriptors with corrected memory layout loaded and linked, but 30-second audio was worse than the 2048-descriptor baseline.
 - `0.2.95`/`0.2.96`: selective descriptor/data range sync experiments rearmed only the first RX ring pass and then starved the stream. Keep full descriptor sync for now.
+- `0.2.99`: enabling the existing sequence replay/moving replay implementation made the stream collapse into silence/repeats after the replay apply. Linux uses on-the-fly sequence replay, so this remains conceptually important, but our current hard apply/restart path is not usable as-is.
+
+### 0.2.100 restored fast-init baseline
+
+This restores the usable 10-second behavior after the failed 0.2.99 replay test. It keeps fast init enabled, sequence replay disabled, moving replay disabled, and returns the catch-up threshold to 8 packets.
+
+```text
+Captures/coreaudio-digi003-test-0.2.100-restored-fastinit-10s.wav
+after_1s_repeated_frames=0
+last_5s_repeated_frames=0
+ring_underrun_frames=0
+```
 
 ## Local Automation Notes
 
