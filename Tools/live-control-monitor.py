@@ -38,6 +38,18 @@ MODE_VIEW_NOTE_NAMES = {
     0x05: "C/H",
     0x06: "D/I",
     0x07: "E/J",
+    0x08: "SHIFT",
+    0x09: "OPT/ALT",
+    0x0A: "CTRL/WIN",
+    0x0B: "COMMAND/CTRL",
+    0x0C: "DEFAULT",
+    0x0D: "INPUT",
+    0x0E: "WRITE",
+    0x0F: "READ",
+    0x10: "TOUCH",
+    0x11: "OFF",
+    0x12: "LATCH",
+    0x13: "SUSPEND",
 }
 ENCODER_ASSIGN_NOTE_COUNT = 8
 ENCODER_ASSIGN_NOTE_NAMES = {
