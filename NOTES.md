@@ -2072,6 +2072,10 @@ B0 40..47 41     = rotary encoder 1..8 clockwise ticks
 B0 40..47 3f     = rotary encoder 1..8 counter-clockwise ticks
 ```
 
+Original driver behavior note:
+- The four modifier keys (`SHIFT`, `OPT/ALT`, `CTRL/WIN`, `COMMAND/CTRL`) behave like real keyboard modifiers globally, while also being visible in the Digi 003 control stream.
+- Our current driver maps and echoes them as Digi control messages. A later keyboard bridge should translate their press/release state to macOS modifier down/up events for original-driver parity.
+
 The monitor labels the confirmed insert/send position switches as `A/F` through
 `E/J`, and labels the rest of the group provisionally as `MODE/VIEW xx` until
 the two-press confirmation pass is complete.
