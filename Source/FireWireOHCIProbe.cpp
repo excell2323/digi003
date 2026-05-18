@@ -11,6 +11,7 @@
 #include <DriverKit/IODMACommand.h>
 #include <DriverKit/IOLib.h>
 #include <DriverKit/IOMemoryMap.h>
+#include <DriverKit/IOUserClient.h>
 #include <DriverKit/IOUserServer.h>
 #include <DriverKit/OSAction.h>
 #include <DriverKit/OSData.h>
@@ -231,6 +232,10 @@ constexpr uint32_t kDigiLiveMidiDecodedFeedbackEnabled = 1;
 constexpr uint32_t kDigiLiveMidiEchoToOutputEnabled = 1;
 constexpr uint32_t kDigiLiveMidiEchoConsolePortOnlyEnabled = 1;
 constexpr uint32_t kDigiLiveMidiEchoQueueSize = 1024;
+constexpr uint32_t kDigiLiveMidiEchoFaderMoveFeedbackEnabled = 1;
+constexpr uint32_t kDigiLiveMidiEchoFaderMoveFeedbackStride = 4;
+constexpr uint32_t kDigiLiveMidiEchoFaderMoveFeedbackMinDelta = 16;
+constexpr uint32_t kDigiLiveMidiEchoFaderMoveFeedbackFlushOnTouchRelease = 1;
 constexpr uint32_t kDigiLiveControlChannelStripCount = 8;
 constexpr uint32_t kDigiLiveControlKindUnknown = 0;
 constexpr uint32_t kDigiLiveControlKindChannelSelect = 1;
@@ -253,6 +258,7 @@ constexpr uint32_t kDigiLiveControlKindShuttle = 17;
 constexpr uint32_t kDigiLiveControlKindModeViewButton = 18;
 constexpr uint32_t kDigiLiveControlKindEncoderAssignButton = 19;
 constexpr uint32_t kDigiLiveControlKindRotaryEncoder = 20;
+constexpr uint32_t kDigiLiveControlKindAboveTransportButton = 21;
 constexpr uint32_t kDigiLiveControlNoteChannelSelect = 0x00;
 constexpr uint32_t kDigiLiveControlNoteChannelSolo = 0x01;
 constexpr uint32_t kDigiLiveControlNoteChannelMute = 0x02;
@@ -271,9 +277,14 @@ constexpr uint32_t kDigiLiveControlGroupNavigation = 0x0d;
 constexpr uint32_t kDigiLiveControlGroupTransport = 0x0e;
 constexpr uint32_t kDigiLiveControlGroupModeView = 0x0a;
 constexpr uint32_t kDigiLiveControlGroupEncoderAssign = 0x0b;
+constexpr uint32_t kDigiLiveControlGroupAboveTransport = 0x0c;
+constexpr uint32_t kDigiLiveControlGroupHardwareMonitor = 0x0f;
+constexpr uint32_t kDigiLiveControlDisplayModeGroup = 0x0b;
+constexpr uint32_t kDigiLiveControlDisplayModeNote = 0x08;
 constexpr uint32_t kDigiLiveControlModeViewButtonCount = 20;
 constexpr uint32_t kDigiLiveControlModeViewFirstNote = 0x00;
 constexpr uint32_t kDigiLiveControlEncoderAssignButtonCount = 8;
+constexpr uint32_t kDigiLiveControlAboveTransportButtonCount = 32;
 constexpr uint32_t kDigiLiveControlRotaryEncoderCount = 8;
 constexpr uint32_t kDigiLiveControlCCRotaryEncoderFirst = 0x40;
 constexpr uint32_t kDigiLiveControlCCJogWheel = 0x4e;
@@ -281,6 +292,11 @@ constexpr uint32_t kDigiLiveControlCCShuttle = 0x5e;
 constexpr uint32_t kDigiLiveControlMotorTestEnabled = 1;
 constexpr uint32_t kDigiLiveControlMotorTestLowTarget10 = 256;
 constexpr uint32_t kDigiLiveControlMotorTestHighTarget10 = 768;
+constexpr uint32_t kDigiLiveControlDebugCommandMidiMessage = 1;
+constexpr uint32_t kDigiLiveControlDebugCommandFaderTarget = 2;
+constexpr uint32_t kFireWireOHCIProbeDebugUserClientType = 0x44494749;
+constexpr uint64_t kDigiLiveControlDebugSelectorMidiMessage = 0;
+constexpr uint64_t kDigiLiveControlDebugSelectorFaderTarget = 1;
 constexpr uint32_t kDigi00xDuplexCIPSFC44100 = 1;
 constexpr uint32_t kDigi00xCIPDBCMask = 0x000000ff;
 constexpr uint32_t kDigi00xCIPSYTMask = 0x0000ffff;
@@ -1299,6 +1315,10 @@ uint32_t gDigiLiveControlModeViewButtonPressed[kDigiLiveControlModeViewButtonCou
 uint32_t gDigiLiveControlModeViewLastNote = 0xffffffff;
 uint32_t gDigiLiveControlModeViewLastIndex = 0xffffffff;
 uint64_t gDigiLiveControlModeViewUpdateCount = 0;
+uint32_t gDigiLiveControlAboveTransportButtonPressed[kDigiLiveControlAboveTransportButtonCount] = {};
+uint32_t gDigiLiveControlAboveTransportLastNote = 0xffffffff;
+uint32_t gDigiLiveControlAboveTransportLastIndex = 0xffffffff;
+uint64_t gDigiLiveControlAboveTransportUpdateCount = 0;
 uint32_t gDigiLiveControlEncoderAssignButtonPressed[kDigiLiveControlEncoderAssignButtonCount] = {};
 uint32_t gDigiLiveControlEncoderAssignLastNote = 0xffffffff;
 uint32_t gDigiLiveControlEncoderAssignLastIndex = 0xffffffff;
@@ -1315,6 +1335,26 @@ uint32_t gDigiLiveControlMotorTestLastChannel = 0xffffffff;
 uint32_t gDigiLiveControlMotorTestLastTarget10 = 0;
 uint32_t gDigiLiveControlMotorTestLastCC = 0;
 uint32_t gDigiLiveControlMotorTestLastValue = 0;
+uint32_t gDigiLiveControlFaderFeedbackMovesSinceSend[kDigiLiveControlChannelStripCount] = {};
+uint32_t gDigiLiveControlFaderFeedbackLastSentValue[kDigiLiveControlChannelStripCount] = {};
+uint32_t gDigiLiveControlFaderFeedbackLastSentValid[kDigiLiveControlChannelStripCount] = {};
+uint64_t gDigiLiveControlFaderFeedbackSentCount = 0;
+uint64_t gDigiLiveControlFaderFeedbackSkippedCount = 0;
+uint64_t gDigiLiveControlFaderFeedbackFlushCount = 0;
+uint32_t gDigiLiveControlFaderFeedbackLastChannel = 0xffffffff;
+uint32_t gDigiLiveControlFaderFeedbackLastCC = 0;
+uint32_t gDigiLiveControlFaderFeedbackLastValue = 0;
+uint64_t gDigiLiveControlDebugCommandCount = 0;
+uint64_t gDigiLiveControlDebugMessageCount = 0;
+uint64_t gDigiLiveControlDebugSkippedCount = 0;
+uint32_t gDigiLiveControlDebugLastCommand = 0;
+uint32_t gDigiLiveControlDebugLastRet = static_cast<uint32_t>(kIOReturnNotReady);
+uint32_t gDigiLiveControlDebugLastPort = 0xffffffff;
+uint32_t gDigiLiveControlDebugLastStatus = 0;
+uint32_t gDigiLiveControlDebugLastData1 = 0;
+uint32_t gDigiLiveControlDebugLastData2 = 0;
+uint32_t gDigiLiveControlDebugLastFaderChannel = 0xffffffff;
+uint32_t gDigiLiveControlDebugLastFaderTarget10 = 0;
 uint64_t gDigiLiveMidiLoggedMessageCount = 0;
 uint32_t gDigiLiveMidiEchoQueueBusy = 0;
 uint32_t gDigiLiveMidiEchoReadIndex = 0;
@@ -1622,6 +1662,84 @@ AddIndexedNumberProperty(OSDictionary * properties,
     return AddNumberProperty(properties, key, value, bits);
 }
 
+bool
+ReadNumberProperty(OSDictionary * properties, const char * key, uint32_t * value)
+{
+    if (properties == nullptr || key == nullptr || value == nullptr) {
+        return false;
+    }
+
+    OSObject * object = properties->getObject(key);
+    OSNumber * number = OSDynamicCast(OSNumber, object);
+    if (number == nullptr) {
+        return false;
+    }
+
+    *value = number->unsigned32BitValue();
+    return true;
+}
+
+uint32_t
+ReadNumberPropertyOrDefault(OSDictionary * properties, const char * key, uint32_t defaultValue)
+{
+    uint32_t value = defaultValue;
+    (void)ReadNumberProperty(properties, key, &value);
+    return value;
+}
+
+void
+AddDigiLiveControlDebugProperties(OSDictionary * properties)
+{
+    if (properties == nullptr) {
+        return;
+    }
+
+    AddNumberProperty(properties,
+                      "ProbeControlDebugCommandCount",
+                      gDigiLiveControlDebugCommandCount,
+                      64);
+    AddNumberProperty(properties,
+                      "ProbeControlDebugMessageCount",
+                      gDigiLiveControlDebugMessageCount,
+                      64);
+    AddNumberProperty(properties,
+                      "ProbeControlDebugSkippedCount",
+                      gDigiLiveControlDebugSkippedCount,
+                      64);
+    AddNumberProperty(properties,
+                      "ProbeControlDebugLastCommand",
+                      gDigiLiveControlDebugLastCommand,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeControlDebugLastRet",
+                      gDigiLiveControlDebugLastRet,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeControlDebugLastPort",
+                      gDigiLiveControlDebugLastPort,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeControlDebugLastStatus",
+                      gDigiLiveControlDebugLastStatus,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeControlDebugLastData1",
+                      gDigiLiveControlDebugLastData1,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeControlDebugLastData2",
+                      gDigiLiveControlDebugLastData2,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeControlDebugLastFaderChannel",
+                      gDigiLiveControlDebugLastFaderChannel,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeControlDebugLastFaderTarget10",
+                      gDigiLiveControlDebugLastFaderTarget10,
+                      32);
+}
+
 void
 PublishDigiLiveControlDiagnostics(uint32_t rawWordBE,
                                   uint32_t marker,
@@ -1731,6 +1849,18 @@ PublishDigiLiveControlDiagnostics(uint32_t rawWordBE,
                       gDigiLiveControlModeViewUpdateCount,
                       64);
     AddNumberProperty(properties,
+                      "ProbeControlStateAboveTransportLastNote",
+                      gDigiLiveControlAboveTransportLastNote,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeControlStateAboveTransportLastIndex",
+                      gDigiLiveControlAboveTransportLastIndex,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeControlStateAboveTransportUpdateCount",
+                      gDigiLiveControlAboveTransportUpdateCount,
+                      64);
+    AddNumberProperty(properties,
                       "ProbeControlStateEncoderAssignLastNote",
                       gDigiLiveControlEncoderAssignLastNote,
                       32);
@@ -1752,6 +1882,14 @@ PublishDigiLiveControlDiagnostics(uint32_t rawWordBE,
                                  i + 1,
                                  "Pressed",
                                  gDigiLiveControlModeViewButtonPressed[i],
+                                 32);
+    }
+    for (uint32_t i = 0; i < kDigiLiveControlAboveTransportButtonCount; ++i) {
+        AddIndexedNumberProperty(properties,
+                                 "ProbeControlStateAboveTransportButton",
+                                 i + 1,
+                                 "Pressed",
+                                 gDigiLiveControlAboveTransportButtonPressed[i],
                                  32);
     }
     for (uint32_t i = 0; i < kDigiLiveControlEncoderAssignButtonCount; ++i) {
@@ -1814,6 +1952,7 @@ PublishDigiLiveControlDiagnostics(uint32_t rawWordBE,
                       "ProbeControlMotorTestLastValue",
                       gDigiLiveControlMotorTestLastValue,
                       32);
+    AddDigiLiveControlDebugProperties(properties);
     for (uint32_t i = 0; i < kDigiLiveControlChannelStripCount; ++i) {
         uint32_t channel = i + 1;
         AddIndexedNumberProperty(properties,
@@ -1866,6 +2005,34 @@ PublishDigiLiveControlDiagnostics(uint32_t rawWordBE,
     AddNumberProperty(properties,
                       "ProbeControlDecodedFeedbackEnabled",
                       kDigiLiveMidiDecodedFeedbackEnabled,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeControlEchoFaderMoveFeedbackEnabled",
+                      kDigiLiveMidiEchoFaderMoveFeedbackEnabled,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeControlFaderFeedbackSentCount",
+                      gDigiLiveControlFaderFeedbackSentCount,
+                      64);
+    AddNumberProperty(properties,
+                      "ProbeControlFaderFeedbackSkippedCount",
+                      gDigiLiveControlFaderFeedbackSkippedCount,
+                      64);
+    AddNumberProperty(properties,
+                      "ProbeControlFaderFeedbackFlushCount",
+                      gDigiLiveControlFaderFeedbackFlushCount,
+                      64);
+    AddNumberProperty(properties,
+                      "ProbeControlFaderFeedbackLastChannel",
+                      gDigiLiveControlFaderFeedbackLastChannel,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeControlFaderFeedbackLastCC",
+                      gDigiLiveControlFaderFeedbackLastCC,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeControlFaderFeedbackLastValue",
+                      gDigiLiveControlFaderFeedbackLastValue,
                       32);
     AddNumberProperty(properties, "ProbeControlEchoEnabled", kDigiLiveMidiEchoToOutputEnabled, 32);
     AddNumberProperty(properties,
@@ -1928,6 +2095,12 @@ QueueDigiLiveDecodedMidiFeedback(uint32_t portNibble,
 bool
 QueueDigiLiveFaderMotorTarget(uint32_t channel, uint32_t target10);
 
+bool
+QueueDigiLiveStoredFaderMoveFeedback(uint32_t channel);
+
+void
+PublishDigiLiveControlDebugDiagnostics();
+
 void
 DecodeDigiLiveRelativeEncoderValue(uint8_t value,
                                    uint32_t * direction,
@@ -1955,7 +2128,6 @@ ObserveDigiLiveMappedControlState(uint32_t portNibble,
                                   uint8_t data2)
 {
     if (portNibble != kDigiLiveMidiControlPortNibble) {
-        gDigiLiveControlUnknownMessageCount++;
         return;
     }
 
@@ -2011,6 +2183,10 @@ ObserveDigiLiveMappedControlState(uint32_t portNibble,
             gDigiLiveControlLastMappedChannel = channel;
             if (channel == 0) {
                 gDigiLiveControlFader1Touched = pressed;
+            }
+            if (pressed == 0 &&
+                kDigiLiveMidiEchoFaderMoveFeedbackFlushOnTouchRelease != 0) {
+                (void)QueueDigiLiveStoredFaderMoveFeedback(channel);
             }
             mapped = true;
         } else if (noteGroup == kDigiLiveControlGroupTransport &&
@@ -2082,6 +2258,16 @@ ObserveDigiLiveMappedControlState(uint32_t portNibble,
             gDigiLiveControlModeViewLastIndex = index;
             gDigiLiveControlModeViewUpdateCount++;
             gDigiLiveControlLastMappedKind = kDigiLiveControlKindModeViewButton;
+            gDigiLiveControlLastMappedChannel = 0xffffffff;
+            mapped = true;
+        } else if (noteGroup == kDigiLiveControlGroupAboveTransport &&
+                   data1 < kDigiLiveControlAboveTransportButtonCount) {
+            uint32_t index = data1;
+            gDigiLiveControlAboveTransportButtonPressed[index] = pressed;
+            gDigiLiveControlAboveTransportLastNote = data1;
+            gDigiLiveControlAboveTransportLastIndex = index;
+            gDigiLiveControlAboveTransportUpdateCount++;
+            gDigiLiveControlLastMappedKind = kDigiLiveControlKindAboveTransportButton;
             gDigiLiveControlLastMappedChannel = 0xffffffff;
             mapped = true;
         } else if (noteGroup == kDigiLiveControlGroupEncoderAssign &&
@@ -2292,6 +2478,96 @@ AppendDigiLiveMidiEchoWordBE(uint32_t wordBE)
 }
 
 bool
+QueueDigiLiveMidiMessageToOutput(uint32_t portNibble,
+                                 uint8_t status,
+                                 uint8_t data1,
+                                 uint8_t data2)
+{
+    if (portNibble >= kDigiLiveMidiPortCount) {
+        return false;
+    }
+
+    uint32_t controlLength2 = ((portNibble & 0x0fu) << 4) | 0x02u;
+    uint32_t controlLength1 = ((portNibble & 0x0fu) << 4) | 0x01u;
+    uint32_t words[2] = {
+        0x80000000u |
+            (static_cast<uint32_t>(status) << 16) |
+            (static_cast<uint32_t>(data1) << 8) |
+            controlLength2,
+        0x80000000u |
+            (static_cast<uint32_t>(data2) << 16) |
+            controlLength1,
+    };
+
+    return AppendDigiLiveMidiEchoWordsBE(words, 2);
+}
+
+bool
+QueueDigiLiveFaderMoveFeedback(uint32_t channel, uint8_t cc, uint8_t value, bool force)
+{
+    if (kDigiLiveMidiEchoFaderMoveFeedbackEnabled == 0) {
+        gDigiLiveControlFaderFeedbackSkippedCount++;
+        return false;
+    }
+    if (channel >= kDigiLiveControlChannelStripCount) {
+        gDigiLiveControlFaderFeedbackSkippedCount++;
+        return false;
+    }
+
+    bool shouldQueue = force;
+    if (!shouldQueue) {
+        gDigiLiveControlFaderFeedbackMovesSinceSend[channel]++;
+        uint32_t sinceSend = gDigiLiveControlFaderFeedbackMovesSinceSend[channel];
+        uint32_t lastValue = gDigiLiveControlFaderFeedbackLastSentValue[channel];
+        uint32_t delta = value > lastValue ? value - lastValue : lastValue - value;
+        shouldQueue = gDigiLiveControlFaderFeedbackLastSentValid[channel] == 0 ||
+                      sinceSend >= kDigiLiveMidiEchoFaderMoveFeedbackStride ||
+                      delta >= kDigiLiveMidiEchoFaderMoveFeedbackMinDelta;
+    } else {
+        gDigiLiveControlFaderFeedbackFlushCount++;
+    }
+
+    if (!shouldQueue) {
+        gDigiLiveControlFaderFeedbackSkippedCount++;
+        return false;
+    }
+
+    bool queued = QueueDigiLiveMidiMessageToOutput(kDigiLiveMidiControlPortNibble,
+                                                   0xb0u,
+                                                   cc,
+                                                   value);
+    if (!queued) {
+        gDigiLiveControlFaderFeedbackSkippedCount++;
+        return false;
+    }
+
+    gDigiLiveControlFaderFeedbackMovesSinceSend[channel] = 0;
+    gDigiLiveControlFaderFeedbackLastSentValue[channel] = value;
+    gDigiLiveControlFaderFeedbackLastSentValid[channel] = 1;
+    gDigiLiveControlFaderFeedbackSentCount++;
+    gDigiLiveControlFaderFeedbackLastChannel = channel;
+    gDigiLiveControlFaderFeedbackLastCC = cc;
+    gDigiLiveControlFaderFeedbackLastValue = value;
+    return true;
+}
+
+bool
+QueueDigiLiveStoredFaderMoveFeedback(uint32_t channel)
+{
+    if (channel >= kDigiLiveControlChannelStripCount ||
+        gDigiLiveControlChannelFaderUpdateCount[channel] == 0) {
+        gDigiLiveControlFaderFeedbackSkippedCount++;
+        return false;
+    }
+
+    return QueueDigiLiveFaderMoveFeedback(
+        channel,
+        static_cast<uint8_t>(gDigiLiveControlChannelFaderControlNumber[channel] & 0xffu),
+        static_cast<uint8_t>(gDigiLiveControlChannelFaderValue[channel] & 0xffu),
+        true);
+}
+
+bool
 QueueDigiLiveDecodedMidiFeedback(uint32_t portNibble,
                                  uint8_t status,
                                  uint8_t data1,
@@ -2314,20 +2590,33 @@ QueueDigiLiveDecodedMidiFeedback(uint32_t portNibble,
         gDigiLiveMidiFeedbackSkippedCount++;
         return false;
     }
+    if (command == 0xb0u &&
+        data1 <= 0x3fu &&
+        kDigiLiveMidiEchoFaderMoveFeedbackEnabled == 0) {
+        gDigiLiveMidiFeedbackSkippedCount++;
+        return false;
+    }
+    if (command == 0xb0u && data1 <= 0x3fu) {
+        uint32_t channel = data1 & 0x07u;
+        if (QueueDigiLiveFaderMoveFeedback(channel, data1, data2, false)) {
+            gDigiLiveMidiFeedbackMessageCount++;
+            return true;
+        }
+        gDigiLiveMidiFeedbackSkippedCount++;
+        return false;
+    }
+    if (command == 0x80u || command == 0x90u) {
+        uint8_t noteGroup = static_cast<uint8_t>(data2 & 0x0fu);
+        if (noteGroup == kDigiLiveControlGroupAboveTransport ||
+            noteGroup == kDigiLiveControlGroupHardwareMonitor ||
+            (noteGroup == kDigiLiveControlDisplayModeGroup &&
+             data1 == kDigiLiveControlDisplayModeNote)) {
+            gDigiLiveMidiFeedbackSkippedCount++;
+            return false;
+        }
+    }
 
-    uint32_t controlLength2 = ((portNibble & 0x0fu) << 4) | 0x02u;
-    uint32_t controlLength1 = ((portNibble & 0x0fu) << 4) | 0x01u;
-    uint32_t words[2] = {
-        0x80000000u |
-            (static_cast<uint32_t>(status) << 16) |
-            (static_cast<uint32_t>(data1) << 8) |
-            controlLength2,
-        0x80000000u |
-            (static_cast<uint32_t>(data2) << 16) |
-            controlLength1,
-    };
-
-    if (AppendDigiLiveMidiEchoWordsBE(words, 2)) {
+    if (QueueDigiLiveMidiMessageToOutput(portNibble, status, data1, data2)) {
         gDigiLiveMidiFeedbackMessageCount++;
         return true;
     } else {
@@ -2348,7 +2637,7 @@ QueueDigiLiveFaderMotorTarget(uint32_t channel, uint32_t target10)
 
     uint8_t coarse = static_cast<uint8_t>((target10 >> 3) & 0x7fu);
     uint8_t cc = static_cast<uint8_t>(((target10 & 0x07u) << 3) | (channel & 0x07u));
-    bool queued = QueueDigiLiveDecodedMidiFeedback(kDigiLiveMidiControlPortNibble,
+    bool queued = QueueDigiLiveMidiMessageToOutput(kDigiLiveMidiControlPortNibble,
                                                    0xb0u,
                                                    cc,
                                                    coarse);
@@ -2360,6 +2649,209 @@ QueueDigiLiveFaderMotorTarget(uint32_t channel, uint32_t target10)
         gDigiLiveControlMotorTestLastValue = coarse;
     }
     return queued;
+}
+
+kern_return_t
+QueueDigiLiveControlDebugMidiCommand(uint32_t portNibble,
+                                     uint32_t status,
+                                     uint32_t data1,
+                                     uint32_t data2)
+{
+    gDigiLiveControlDebugCommandCount++;
+    gDigiLiveControlDebugLastCommand = kDigiLiveControlDebugCommandMidiMessage;
+    gDigiLiveControlDebugLastRet = static_cast<uint32_t>(kIOReturnBadArgument);
+
+    if (portNibble >= kDigiLiveMidiPortCount ||
+        status > 0xffu ||
+        data1 > 0xffu ||
+        data2 > 0xffu) {
+        gDigiLiveControlDebugSkippedCount++;
+        PublishDigiLiveControlDebugDiagnostics();
+        return kIOReturnBadArgument;
+    }
+
+    gDigiLiveControlDebugLastPort = portNibble;
+    gDigiLiveControlDebugLastStatus = status;
+    gDigiLiveControlDebugLastData1 = data1;
+    gDigiLiveControlDebugLastData2 = data2;
+    gDigiLiveControlDebugLastFaderChannel = 0xffffffff;
+    gDigiLiveControlDebugLastFaderTarget10 = 0;
+
+    bool queued = QueueDigiLiveMidiMessageToOutput(portNibble,
+                                                   static_cast<uint8_t>(status),
+                                                   static_cast<uint8_t>(data1),
+                                                   static_cast<uint8_t>(data2));
+    if (queued) {
+        gDigiLiveControlDebugMessageCount++;
+        gDigiLiveControlDebugLastRet = static_cast<uint32_t>(kIOReturnSuccess);
+        PublishDigiLiveControlDebugDiagnostics();
+        return kIOReturnSuccess;
+    }
+
+    gDigiLiveControlDebugSkippedCount++;
+    gDigiLiveControlDebugLastRet = static_cast<uint32_t>(kIOReturnNoResources);
+    PublishDigiLiveControlDebugDiagnostics();
+    return kIOReturnNoResources;
+}
+
+kern_return_t
+QueueDigiLiveControlDebugFaderTarget(uint32_t channel, uint32_t target10)
+{
+    gDigiLiveControlDebugCommandCount++;
+    gDigiLiveControlDebugLastCommand = kDigiLiveControlDebugCommandFaderTarget;
+    gDigiLiveControlDebugLastRet = static_cast<uint32_t>(kIOReturnBadArgument);
+
+    if (channel < 1u ||
+        channel > kDigiLiveControlChannelStripCount ||
+        target10 > 1023u) {
+        gDigiLiveControlDebugSkippedCount++;
+        PublishDigiLiveControlDebugDiagnostics();
+        return kIOReturnBadArgument;
+    }
+
+    gDigiLiveControlDebugLastPort = kDigiLiveMidiControlPortNibble;
+    gDigiLiveControlDebugLastStatus = 0xb0u;
+    gDigiLiveControlDebugLastData1 = ((target10 & 0x07u) << 3) | ((channel - 1u) & 0x07u);
+    gDigiLiveControlDebugLastData2 = (target10 >> 3) & 0x7fu;
+    gDigiLiveControlDebugLastFaderChannel = channel;
+    gDigiLiveControlDebugLastFaderTarget10 = target10;
+
+    bool queued = QueueDigiLiveFaderMotorTarget(channel - 1u, target10);
+    if (queued) {
+        gDigiLiveControlDebugMessageCount++;
+        gDigiLiveControlDebugLastRet = static_cast<uint32_t>(kIOReturnSuccess);
+        PublishDigiLiveControlDebugDiagnostics();
+        return kIOReturnSuccess;
+    }
+
+    gDigiLiveControlDebugSkippedCount++;
+    gDigiLiveControlDebugLastRet = static_cast<uint32_t>(kIOReturnNoResources);
+    PublishDigiLiveControlDebugDiagnostics();
+    return kIOReturnNoResources;
+}
+
+void
+PublishDigiLiveControlDebugDiagnostics()
+{
+    if (gDriverInstance == nullptr) {
+        return;
+    }
+
+    OSDictionary * properties = OSDictionary::withCapacity(16);
+    if (properties == nullptr) {
+        return;
+    }
+
+    AddDigiLiveControlDebugProperties(properties);
+    AddNumberProperty(properties, "ProbeControlEchoQueueCount", gDigiLiveMidiEchoQueueCount, 32);
+    AddNumberProperty(properties, "ProbeControlEchoLastQueuedRawWordBE", gDigiLiveMidiEchoLastQueuedRawWordBE, 32);
+    AddNumberProperty(properties, "ProbeControlEchoDropCount", gDigiLiveMidiEchoDropCount, 64);
+    AddNumberProperty(properties,
+                      "ProbeControlMotorTestLastChannel",
+                      gDigiLiveControlMotorTestLastChannel,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeControlMotorTestLastTarget10",
+                      gDigiLiveControlMotorTestLastTarget10,
+                      32);
+    gDriverInstance->SetProperties(properties);
+    properties->release();
+}
+
+kern_return_t
+ProcessDigiLiveControlDebugSetProperties(OSDictionary * properties)
+{
+    uint32_t command = 0;
+    if (!ReadNumberProperty(properties, "ProbeControlDebugCommand", &command)) {
+        return kIOReturnUnsupported;
+    }
+
+    gDigiLiveControlDebugCommandCount++;
+    gDigiLiveControlDebugLastCommand = command;
+    gDigiLiveControlDebugLastRet = static_cast<uint32_t>(kIOReturnBadArgument);
+
+    if (command == kDigiLiveControlDebugCommandMidiMessage) {
+        uint32_t status = 0;
+        uint32_t data1 = 0;
+        uint32_t data2 = 0;
+        uint32_t portNibble =
+            ReadNumberPropertyOrDefault(properties,
+                                        "ProbeControlDebugPort",
+                                        kDigiLiveMidiControlPortNibble);
+
+        if (!ReadNumberProperty(properties, "ProbeControlDebugStatus", &status) ||
+            !ReadNumberProperty(properties, "ProbeControlDebugData1", &data1) ||
+            !ReadNumberProperty(properties, "ProbeControlDebugData2", &data2) ||
+            portNibble >= kDigiLiveMidiPortCount ||
+            status > 0xffu ||
+            data1 > 0xffu ||
+            data2 > 0xffu) {
+            gDigiLiveControlDebugSkippedCount++;
+            PublishDigiLiveControlDebugDiagnostics();
+            return kIOReturnBadArgument;
+        }
+
+        gDigiLiveControlDebugLastPort = portNibble;
+        gDigiLiveControlDebugLastStatus = status;
+        gDigiLiveControlDebugLastData1 = data1;
+        gDigiLiveControlDebugLastData2 = data2;
+        gDigiLiveControlDebugLastFaderChannel = 0xffffffff;
+        gDigiLiveControlDebugLastFaderTarget10 = 0;
+
+        bool queued = QueueDigiLiveMidiMessageToOutput(portNibble,
+                                                       static_cast<uint8_t>(status),
+                                                       static_cast<uint8_t>(data1),
+                                                       static_cast<uint8_t>(data2));
+        if (queued) {
+            gDigiLiveControlDebugMessageCount++;
+            gDigiLiveControlDebugLastRet = static_cast<uint32_t>(kIOReturnSuccess);
+            PublishDigiLiveControlDebugDiagnostics();
+            return kIOReturnSuccess;
+        }
+
+        gDigiLiveControlDebugSkippedCount++;
+        gDigiLiveControlDebugLastRet = static_cast<uint32_t>(kIOReturnNoResources);
+        PublishDigiLiveControlDebugDiagnostics();
+        return kIOReturnNoResources;
+    }
+
+    if (command == kDigiLiveControlDebugCommandFaderTarget) {
+        uint32_t channel = 0;
+        uint32_t target10 = 0;
+        if (!ReadNumberProperty(properties, "ProbeControlDebugFaderChannel", &channel) ||
+            !ReadNumberProperty(properties, "ProbeControlDebugFaderTarget10", &target10) ||
+            channel < 1u ||
+            channel > kDigiLiveControlChannelStripCount ||
+            target10 > 1023u) {
+            gDigiLiveControlDebugSkippedCount++;
+            PublishDigiLiveControlDebugDiagnostics();
+            return kIOReturnBadArgument;
+        }
+
+        gDigiLiveControlDebugLastPort = kDigiLiveMidiControlPortNibble;
+        gDigiLiveControlDebugLastStatus = 0xb0u;
+        gDigiLiveControlDebugLastData1 = ((target10 & 0x07u) << 3) | ((channel - 1u) & 0x07u);
+        gDigiLiveControlDebugLastData2 = (target10 >> 3) & 0x7fu;
+        gDigiLiveControlDebugLastFaderChannel = channel;
+        gDigiLiveControlDebugLastFaderTarget10 = target10;
+
+        bool queued = QueueDigiLiveFaderMotorTarget(channel - 1u, target10);
+        if (queued) {
+            gDigiLiveControlDebugMessageCount++;
+            gDigiLiveControlDebugLastRet = static_cast<uint32_t>(kIOReturnSuccess);
+            PublishDigiLiveControlDebugDiagnostics();
+            return kIOReturnSuccess;
+        }
+
+        gDigiLiveControlDebugSkippedCount++;
+        gDigiLiveControlDebugLastRet = static_cast<uint32_t>(kIOReturnNoResources);
+        PublishDigiLiveControlDebugDiagnostics();
+        return kIOReturnNoResources;
+    }
+
+    gDigiLiveControlDebugSkippedCount++;
+    PublishDigiLiveControlDebugDiagnostics();
+    return kIOReturnUnsupported;
 }
 
 uint32_t
@@ -3089,6 +3581,18 @@ PublishAudioRuntimeDiagnostics()
                       gDigiLiveControlModeViewUpdateCount,
                       64);
     AddNumberProperty(properties,
+                      "ProbeControlStateAboveTransportLastNote",
+                      gDigiLiveControlAboveTransportLastNote,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeControlStateAboveTransportLastIndex",
+                      gDigiLiveControlAboveTransportLastIndex,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeControlStateAboveTransportUpdateCount",
+                      gDigiLiveControlAboveTransportUpdateCount,
+                      64);
+    AddNumberProperty(properties,
                       "ProbeControlStateEncoderAssignLastNote",
                       gDigiLiveControlEncoderAssignLastNote,
                       32);
@@ -3110,6 +3614,14 @@ PublishAudioRuntimeDiagnostics()
                                  i + 1,
                                  "Pressed",
                                  gDigiLiveControlModeViewButtonPressed[i],
+                                 32);
+    }
+    for (uint32_t i = 0; i < kDigiLiveControlAboveTransportButtonCount; ++i) {
+        AddIndexedNumberProperty(properties,
+                                 "ProbeControlStateAboveTransportButton",
+                                 i + 1,
+                                 "Pressed",
+                                 gDigiLiveControlAboveTransportButtonPressed[i],
                                  32);
     }
     for (uint32_t i = 0; i < kDigiLiveControlEncoderAssignButtonCount; ++i) {
@@ -3172,6 +3684,7 @@ PublishAudioRuntimeDiagnostics()
                       "ProbeControlMotorTestLastValue",
                       gDigiLiveControlMotorTestLastValue,
                       32);
+    AddDigiLiveControlDebugProperties(properties);
     for (uint32_t i = 0; i < kDigiLiveControlChannelStripCount; ++i) {
         uint32_t channel = i + 1;
         AddIndexedNumberProperty(properties,
@@ -3224,6 +3737,34 @@ PublishAudioRuntimeDiagnostics()
     AddNumberProperty(properties,
                       "ProbeControlDecodedFeedbackEnabled",
                       kDigiLiveMidiDecodedFeedbackEnabled,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeControlEchoFaderMoveFeedbackEnabled",
+                      kDigiLiveMidiEchoFaderMoveFeedbackEnabled,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeControlFaderFeedbackSentCount",
+                      gDigiLiveControlFaderFeedbackSentCount,
+                      64);
+    AddNumberProperty(properties,
+                      "ProbeControlFaderFeedbackSkippedCount",
+                      gDigiLiveControlFaderFeedbackSkippedCount,
+                      64);
+    AddNumberProperty(properties,
+                      "ProbeControlFaderFeedbackFlushCount",
+                      gDigiLiveControlFaderFeedbackFlushCount,
+                      64);
+    AddNumberProperty(properties,
+                      "ProbeControlFaderFeedbackLastChannel",
+                      gDigiLiveControlFaderFeedbackLastChannel,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeControlFaderFeedbackLastCC",
+                      gDigiLiveControlFaderFeedbackLastCC,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeControlFaderFeedbackLastValue",
+                      gDigiLiveControlFaderFeedbackLastValue,
                       32);
     AddNumberProperty(properties, "ProbeControlEchoEnabled", kDigiLiveMidiEchoToOutputEnabled, 32);
     AddNumberProperty(properties,
@@ -4746,7 +5287,16 @@ ConfigureAudioDevice(FireWireOHCIProbe * driver)
         gDigiLiveControlChannelFaderValue[i] = 0;
         gDigiLiveControlChannelFaderUpdateCount[i] = 0;
         gDigiLiveControlMotorTestToggle[i] = 0;
+        gDigiLiveControlFaderFeedbackMovesSinceSend[i] = 0;
+        gDigiLiveControlFaderFeedbackLastSentValue[i] = 0;
+        gDigiLiveControlFaderFeedbackLastSentValid[i] = 0;
     }
+    gDigiLiveControlFaderFeedbackSentCount = 0;
+    gDigiLiveControlFaderFeedbackSkippedCount = 0;
+    gDigiLiveControlFaderFeedbackFlushCount = 0;
+    gDigiLiveControlFaderFeedbackLastChannel = 0xffffffff;
+    gDigiLiveControlFaderFeedbackLastCC = 0;
+    gDigiLiveControlFaderFeedbackLastValue = 0;
     gDigiLiveControlSelect1Pressed = 0;
     gDigiLiveControlFader1Touched = 0;
     gDigiLiveControlFader1ControlNumber = 0;
@@ -4774,6 +5324,12 @@ ConfigureAudioDevice(FireWireOHCIProbe * driver)
     gDigiLiveControlModeViewLastNote = 0xffffffff;
     gDigiLiveControlModeViewLastIndex = 0xffffffff;
     gDigiLiveControlModeViewUpdateCount = 0;
+    for (uint32_t i = 0; i < kDigiLiveControlAboveTransportButtonCount; ++i) {
+        gDigiLiveControlAboveTransportButtonPressed[i] = 0;
+    }
+    gDigiLiveControlAboveTransportLastNote = 0xffffffff;
+    gDigiLiveControlAboveTransportLastIndex = 0xffffffff;
+    gDigiLiveControlAboveTransportUpdateCount = 0;
     for (uint32_t i = 0; i < kDigiLiveControlEncoderAssignButtonCount; ++i) {
         gDigiLiveControlEncoderAssignButtonPressed[i] = 0;
     }
@@ -11295,6 +11851,93 @@ StopAudioRefreshWorker(bool waitForExit)
     }
     PublishAudioRuntimeDiagnostics();
 }
+}
+
+kern_return_t
+IMPL(FireWireOHCIProbe, NewUserClient)
+{
+    if (type == kFireWireOHCIProbeDebugUserClientType) {
+        IOService * service = nullptr;
+        kern_return_t ret =
+            Create(this, "FireWireOHCIProbeDebugUserClientProperties", &service);
+        if (ret != kIOReturnSuccess) {
+            return ret;
+        }
+
+        IOUserClient * client = OSDynamicCast(IOUserClient, service);
+        if (client == nullptr) {
+            if (service != nullptr) {
+                service->release();
+            }
+            return kIOReturnUnsupported;
+        }
+
+        *userClient = client;
+        return kIOReturnSuccess;
+    }
+
+    return NewUserClient(type, userClient, SUPERDISPATCH);
+}
+
+kern_return_t
+IMPL(FireWireOHCIProbe, SetProperties)
+{
+    if (properties != nullptr &&
+        properties->getObject("ProbeControlDebugCommand") != nullptr) {
+        return ProcessDigiLiveControlDebugSetProperties(properties);
+    }
+
+    return SetProperties(properties, SUPERDISPATCH);
+}
+
+kern_return_t
+IMPL(FireWireOHCIProbe, UserSetProperties)
+{
+    OSDictionary * dictionary = OSDynamicCast(OSDictionary, properties);
+    if (dictionary != nullptr &&
+        dictionary->getObject("ProbeControlDebugCommand") != nullptr) {
+        return ProcessDigiLiveControlDebugSetProperties(dictionary);
+    }
+
+    return UserSetProperties(properties, SUPERDISPATCH);
+}
+
+kern_return_t
+FireWireOHCIProbeDebugUserClient::ExternalMethod(uint64_t selector,
+                                                 IOUserClientMethodArguments * arguments,
+                                                 const IOUserClientMethodDispatch * dispatch,
+                                                 OSObject * target,
+                                                 void * reference)
+{
+    (void)dispatch;
+    (void)target;
+    (void)reference;
+
+    if (arguments == nullptr || arguments->scalarInput == nullptr) {
+        return kIOReturnBadArgument;
+    }
+
+    if (selector == kDigiLiveControlDebugSelectorMidiMessage) {
+        if (arguments->scalarInputCount < 4) {
+            return kIOReturnBadArgument;
+        }
+        return QueueDigiLiveControlDebugMidiCommand(
+            static_cast<uint32_t>(arguments->scalarInput[0]),
+            static_cast<uint32_t>(arguments->scalarInput[1]),
+            static_cast<uint32_t>(arguments->scalarInput[2]),
+            static_cast<uint32_t>(arguments->scalarInput[3]));
+    }
+
+    if (selector == kDigiLiveControlDebugSelectorFaderTarget) {
+        if (arguments->scalarInputCount < 2) {
+            return kIOReturnBadArgument;
+        }
+        return QueueDigiLiveControlDebugFaderTarget(
+            static_cast<uint32_t>(arguments->scalarInput[0]),
+            static_cast<uint32_t>(arguments->scalarInput[1]));
+    }
+
+    return kIOReturnUnsupported;
 }
 
 kern_return_t

@@ -123,11 +123,53 @@ Additional block probes:
 90 07 4b/0b     = ESC
 B0 40..47 41     = rotary encoder 1..8 clockwise ticks
 B0 40..47 3f     = rotary encoder 1..8 counter-clockwise ticks
+
+90 00..1f 4c/0c = Above Transport block (2 rows of 6 buttons plus 1 row of 5)
+90 00 4c/0c     = ENTER
+90 01 4c/0c     = UNDO
+90 02 4c/0c     = SAVE
+90 05 4c/0c     = REC ARM
+90 06 4c/0c     = METER
+90 00 4d/0d     = FLIP
+90 01 4d/0d     = MASTER FADERS
+90 02 4d/0d     = BANK
+90 03 4d/0d     = NUDGE
+90 04 4d/0d     = ZOOM
+90 00 4e/0e     = PLUG-IN
+90 01 4e/0e     = MIX
+90 02 4e/0e     = EDIT
+90 03 4e/0e     = LOOP PLAY
+90 04 4e/0e     = LOOP REC
+90 05 4e/0e     = QUICK PUNCH
+90 0c 4e/0e     = MEM LOC
+90 0b 4d/0d     = MIDI RECALL
+90 0a 4d/0d     = MIDI EDIT
+90 09 4d/0d     = UTILITY
+90 0c 4d/0d     = FADER MUTE
+90 0d 4d/0d     = FOCUS
+90 08 4b/0b     = DISPLAY MODE
+90 00 4f/0f     = MIC/DI CH1
+90 01 4f/0f     = HPF CH1
+90 02 4f/0f     = MIC/DI CH2
+90 03 4f/0f     = HPF CH2
+90 04 4f/0f     = MIC/DI CH3
+90 05 4f/0f     = HPF CH3
+90 06 4f/0f     = MIC/DI CH4
+90 07 4f/0f     = HPF CH4
+90 0f 4f/0f     = AUX IN 7+8
+90 0e 4f/0f     = 3/4 + HP2
+90 0d 4f/0f     = AUX IN
+90 0c 4f/0f     = ALT CR
+90 0b 4f/0f     = MONO
+90 0a 4f/0f     = MUTE
 ```
 
 Original driver behavior note:
 - The four modifier keys (`SHIFT`, `OPT/ALT`, `CTRL/WIN`, `COMMAND/CTRL`) behave like real keyboard modifiers globally, while also being visible in the Digi 003 control stream.
 - Our current driver maps and echoes them as Digi control messages. A later keyboard bridge should translate their press/release state to macOS modifier down/up events for original-driver parity.
+- The `Above Transport` group (`0C`) is intentionally not echoed back to the console. During the first MIDI Map test, echoed group-`0C` notes briefly moved faders 7 and 8.
+- The hardware monitoring / mic preamp group (`0F`) is also treated as no-echo control state; it is console hardware state, not DAW feedback.
+- `A MIDI MAP` enters the console's internal MIDI mode; the display shows `Midi Mode A:1 Standard midi map` and the console emits separate port-`0` MIDI messages such as `B0 0A xx`. The encoders can be turned in this mode and are expected to belong to the later CoreMIDI-facing path rather than the Pro Tools control-surface mapper.
 
 The remaining printed labels for the Mode/View and Encoder Assignment buttons
 are still being confirmed from the front-panel photo and live two-press tests.

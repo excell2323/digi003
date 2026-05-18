@@ -15,13 +15,13 @@
     <key>CFBundlePackageType</key>
     <string>DEXT</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.2.167</string>
+	<string>0.2.175</string>
     <key>CFBundleSupportedPlatforms</key>
     <array>
         <string>DriverKit</string>
     </array>
 	<key>CFBundleVersion</key>
-	<string>367</string>
+	<string>375</string>
     <key>IOKitPersonalities</key>
     <dict>
         <key>FireWireOHCIProbe</key>
@@ -49,6 +49,26 @@
                 <key>IOUserClass</key>
                 <string>IOUserAudioDriverUserClient</string>
             </dict>
+            <key>FireWireOHCIProbeDebugUserClientProperties</key>
+            <dict>
+                <key>IOClass</key>
+                <string>IOUserUserClient</string>
+                <key>IOUserClass</key>
+                <string>FireWireOHCIProbeDebugUserClient</string>
+            </dict>
+            <key>IORegistryEntryAllowableSetProperties</key>
+            <array>
+                <string>ProbeControlDebugSequence</string>
+                <string>ProbeControlDebugCommand</string>
+                <string>ProbeControlDebugPort</string>
+                <string>ProbeControlDebugStatus</string>
+                <string>ProbeControlDebugData1</string>
+                <string>ProbeControlDebugData2</string>
+                <string>ProbeControlDebugFaderChannel</string>
+                <string>ProbeControlDebugFaderTarget10</string>
+            </array>
+            <key>IORegistryEntryDefaultLockingSetProperties</key>
+            <true/>
             <key>IOUserServerName</key>
             <string>com.axelheckert.driver.FireWireOHCIProbe</string>
         </dict>

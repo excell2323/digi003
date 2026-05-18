@@ -62,6 +62,50 @@ ENCODER_ASSIGN_NOTE_NAMES = {
     0x06: "MASTER BYPASS",
     0x07: "ESC",
 }
+ABOVE_TRANSPORT_NOTE_COUNT = 32
+ABOVE_TRANSPORT_NOTE_NAMES = {
+    0x00: "ENTER",
+    0x01: "UNDO",
+    0x02: "SAVE",
+    0x05: "REC ARM",
+    0x06: "METER",
+}
+HARDWARE_MONITOR_NOTE_NAMES = {
+    (0x0F, 0x00): "MIC/DI CH1",
+    (0x0F, 0x01): "HPF CH1",
+    (0x0F, 0x02): "MIC/DI CH2",
+    (0x0F, 0x03): "HPF CH2",
+    (0x0F, 0x04): "MIC/DI CH3",
+    (0x0F, 0x05): "HPF CH3",
+    (0x0F, 0x06): "MIC/DI CH4",
+    (0x0F, 0x07): "HPF CH4",
+    (0x0F, 0x0F): "AUX IN 7+8",
+    (0x0F, 0x0E): "3/4 + HP2",
+    (0x0F, 0x0D): "AUX IN",
+    (0x0F, 0x0C): "ALT CR",
+    (0x0F, 0x0B): "MONO",
+    (0x0F, 0x0A): "MUTE",
+    (0x0B, 0x08): "DISPLAY MODE",
+}
+TRANSPORT_SECTION_NOTE_NAMES = {
+    (0x0D, 0x00): "FLIP",
+    (0x0D, 0x01): "MASTER FADERS",
+    (0x0D, 0x02): "BANK",
+    (0x0D, 0x03): "NUDGE",
+    (0x0D, 0x04): "ZOOM",
+    (0x0E, 0x00): "PLUG-IN",
+    (0x0E, 0x01): "MIX",
+    (0x0E, 0x02): "EDIT",
+    (0x0E, 0x03): "LOOP PLAY",
+    (0x0E, 0x04): "LOOP REC",
+    (0x0E, 0x05): "QUICK PUNCH",
+    (0x0E, 0x0C): "MEM LOC",
+    (0x0D, 0x0B): "MIDI RECALL",
+    (0x0D, 0x0A): "MIDI EDIT",
+    (0x0D, 0x09): "UTILITY",
+    (0x0D, 0x0C): "FADER MUTE",
+    (0x0D, 0x0D): "FOCUS",
+}
 ROTARY_ENCODER_CC_FIRST = 0x40
 ROTARY_ENCODER_COUNT = 8
 
@@ -141,6 +185,15 @@ def describe_message(message):
             return f"{prefix} | {name} {state} value=0x{data2:02X}"
         if group == 0x0B and data1 < ENCODER_ASSIGN_NOTE_COUNT:
             name = ENCODER_ASSIGN_NOTE_NAMES.get(data1, f"ENCODER ASSIGN {data1 + 1}")
+            return f"{prefix} | {name} {state} value=0x{data2:02X}"
+        if group == 0x0C and data1 < ABOVE_TRANSPORT_NOTE_COUNT:
+            name = ABOVE_TRANSPORT_NOTE_NAMES.get(data1, f"ABOVE TRANSPORT {data1:02X}")
+            return f"{prefix} | {name} {state} value=0x{data2:02X}"
+        if (group, data1) in HARDWARE_MONITOR_NOTE_NAMES:
+            name = HARDWARE_MONITOR_NOTE_NAMES[(group, data1)]
+            return f"{prefix} | {name} {state} value=0x{data2:02X}"
+        if (group, data1) in TRANSPORT_SECTION_NOTE_NAMES:
+            name = TRANSPORT_SECTION_NOTE_NAMES[(group, data1)]
             return f"{prefix} | {name} {state} value=0x{data2:02X}"
         if group < 8 and data1 in CHANNEL_NOTE_NAMES:
             channel = (data2 & 0x07) + 1
