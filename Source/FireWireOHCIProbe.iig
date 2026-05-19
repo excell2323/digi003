@@ -25,6 +25,9 @@ public:
     SetProperties(OSDictionary * properties) override;
 
     virtual kern_return_t
+    SetPowerState(uint32_t powerFlags) override;
+
+    virtual kern_return_t
     UserSetProperties(OSContainer * properties) LOCAL;
 
     virtual kern_return_t

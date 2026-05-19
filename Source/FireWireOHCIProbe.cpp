@@ -193,6 +193,9 @@ constexpr uint32_t kAsyncReadAttemptCount = 6;
 constexpr uint32_t kAsyncReadWaitLoopsPerAttempt = 250;
 constexpr uint32_t kAsyncReadWaitMilliseconds = 10;
 constexpr uint32_t kAsyncReadRetrySettleMilliseconds = 1000;
+constexpr uint32_t kDigiLiveAsyncAttemptCount = 2;
+constexpr uint32_t kDigiLiveAsyncWaitLoopsPerAttempt = 25;
+constexpr uint32_t kDigiLiveAsyncRetrySettleMilliseconds = 100;
 constexpr size_t kConfigROMProbeReadCount = 32;
 constexpr size_t kConfigROMProbeDetailedCount = 16;
 constexpr size_t kDigi00xRegisterProbeCount = 10;
@@ -362,6 +365,10 @@ constexpr uint32_t kAudioOutputChannelCount = 8;
 constexpr uint32_t kAudioOutputBufferOffsetMode = 1;
 constexpr uint32_t kAudioOutputRingPrebufferFrames = 1024;
 constexpr uint32_t kAudioOutputRingKeepFrames = 0;
+constexpr uint32_t kAudioRuntimeCallbackRestartEnabled = 1;
+constexpr uint32_t kAudioRuntimeRestartReasonInputCallback = 1;
+constexpr uint32_t kAudioRuntimeRestartReasonOutputCallback = 2;
+constexpr uint32_t kAudioRuntimeRestartReasonPowerOn = 3;
 constexpr uint32_t kAudioRefreshStopWaitLoopLimit = 1000;
 constexpr uint32_t kAudioDirectInputBufferEnabled = 0;
 constexpr uint32_t kAudioCallbackHarvestEnabled = 1;
@@ -1105,6 +1112,17 @@ uint32_t gAudioStartDeviceRet = static_cast<uint32_t>(kIOReturnNotReady);
 uint32_t gAudioStopDeviceRet = static_cast<uint32_t>(kIOReturnNotReady);
 uint32_t gAudioStartDeviceObjectID = 0;
 uint32_t gAudioStopDeviceObjectID = 0;
+uint32_t gAudioStartDeviceStage = 0;
+uint32_t gAudioStopDeviceStage = 0;
+uint32_t gAudioRuntimeDeviceStarted = 0;
+uint32_t gPowerStateLastFlags = 0xffffffff;
+uint32_t gPowerStateLastRet = static_cast<uint32_t>(kIOReturnNotReady);
+uint64_t gPowerStateChangeCount = 0;
+uint64_t gPowerStateOnCount = 0;
+uint64_t gPowerStateOffCount = 0;
+uint64_t gPowerStateLowCount = 0;
+uint64_t gPowerStateLiveStopCount = 0;
+uint64_t gPowerStateWakeRestartRequestCount = 0;
 uint32_t gAudioDeviceStartIOCount = 0;
 uint32_t gAudioDeviceStopIOCount = 0;
 uint32_t gAudioDeviceStartIORet = static_cast<uint32_t>(kIOReturnNotReady);
@@ -1139,6 +1157,18 @@ uint32_t gAudioInputCallbackHarvestSuccessCount = 0;
 uint32_t gAudioInputCallbackHarvestRet = static_cast<uint32_t>(kIOReturnNotReady);
 uint32_t gAudioInputCallbackHarvestLastFillFrames = 0;
 uint32_t gAudioOutputCallbackCount = 0;
+uint32_t gAudioRuntimeRestartInProgress = 0;
+uint32_t gAudioRuntimeRestartLastReason = 0;
+uint32_t gAudioRuntimeRestartLastRet = static_cast<uint32_t>(kIOReturnNotReady);
+uint32_t gAudioRuntimeRestartLastLiveRet = static_cast<uint32_t>(kIOReturnNotReady);
+uint32_t gAudioRuntimeRestartLastDigiRunning = 0;
+uint32_t gAudioRuntimeRestartLastDigiReady = 0;
+uint32_t gAudioRuntimeRestartLastWorkerRunning = 0;
+uint64_t gAudioRuntimeRestartRequestCount = 0;
+uint64_t gAudioRuntimeRestartDispatchCount = 0;
+uint64_t gAudioRuntimeRestartSuccessCount = 0;
+uint64_t gAudioRuntimeRestartSkippedCount = 0;
+uint64_t gAudioRuntimeRestartBusyCount = 0;
 uint32_t gAudioOutputLastBufferFrameSize = 0;
 uint64_t gAudioOutputLastSampleTime = 0;
 uint32_t gAudioCaptureFrameCount = 0;
@@ -1189,6 +1219,11 @@ uint32_t gDigiLiveState = kDigiLiveStateStopped;
 uint32_t gDigiLiveDrainBusy = 0;
 uint32_t gDigiLiveStartRet = static_cast<uint32_t>(kIOReturnNotReady);
 uint32_t gDigiLiveStopRet = static_cast<uint32_t>(kIOReturnNotReady);
+uint32_t gDigiLiveStartStage = 0;
+uint32_t gDigiLiveBeginTransactionStage = 0;
+uint32_t gDigiLiveBeginTransactionRet = static_cast<uint32_t>(kIOReturnNotReady);
+uint32_t gDigiLiveIsoStartStage = 0;
+uint32_t gDigiLiveIsoStartRet = static_cast<uint32_t>(kIOReturnNotReady);
 uint32_t gDigiLiveLastHarvestRet = static_cast<uint32_t>(kIOReturnNotReady);
 uint32_t gDigiLiveIRReadIndex = 0;
 uint32_t gDigiLiveIRCommandPtrPacketIndex = 0xffffffff;
@@ -1596,6 +1631,12 @@ AppendAudioOutputBufferToRing(uint32_t frameCount, uint64_t sampleTime);
 
 kern_return_t
 PushAudioOutputToDigiLiveTransmit();
+
+void
+RequestAudioRuntimeRestart(uint32_t reason);
+
+bool
+DigiLiveStreamMayNeedStop();
 
 uint32_t
 Digi00xDuplexDataBlocksForPacket(uint32_t packetIndex);
@@ -3811,10 +3852,37 @@ PublishAudioRuntimeDiagnostics()
     AddNumberProperty(properties, "ProbeAudioRuntimeStopDeviceRet", gAudioStopDeviceRet, 32);
     AddNumberProperty(properties, "ProbeAudioRuntimeStartDeviceObjectID", gAudioStartDeviceObjectID, 32);
     AddNumberProperty(properties, "ProbeAudioRuntimeStopDeviceObjectID", gAudioStopDeviceObjectID, 32);
+    AddNumberProperty(properties, "ProbeAudioRuntimeStartDeviceStage", gAudioStartDeviceStage, 32);
+    AddNumberProperty(properties, "ProbeAudioRuntimeStopDeviceStage", gAudioStopDeviceStage, 32);
+    AddNumberProperty(properties, "ProbeAudioRuntimeDeviceStarted", gAudioRuntimeDeviceStarted, 32);
+    AddNumberProperty(properties, "ProbePowerStateLastFlags", gPowerStateLastFlags, 32);
+    AddNumberProperty(properties, "ProbePowerStateLastRet", gPowerStateLastRet, 32);
+    AddNumberProperty(properties, "ProbePowerStateChangeCount", gPowerStateChangeCount, 64);
+    AddNumberProperty(properties, "ProbePowerStateOnCount", gPowerStateOnCount, 64);
+    AddNumberProperty(properties, "ProbePowerStateOffCount", gPowerStateOffCount, 64);
+    AddNumberProperty(properties, "ProbePowerStateLowCount", gPowerStateLowCount, 64);
+    AddNumberProperty(properties, "ProbePowerStateLiveStopCount", gPowerStateLiveStopCount, 64);
+    AddNumberProperty(properties,
+                      "ProbePowerStateWakeRestartRequestCount",
+                      gPowerStateWakeRestartRequestCount,
+                      64);
     AddNumberProperty(properties, "ProbeAudioRuntimeDeviceStartIOCount", gAudioDeviceStartIOCount, 32);
     AddNumberProperty(properties, "ProbeAudioRuntimeDeviceStopIOCount", gAudioDeviceStopIOCount, 32);
     AddNumberProperty(properties, "ProbeAudioRuntimeDeviceStartIORet", gAudioDeviceStartIORet, 32);
     AddNumberProperty(properties, "ProbeAudioRuntimeDeviceStopIORet", gAudioDeviceStopIORet, 32);
+    AddNumberProperty(properties, "ProbeAudioRuntimeCallbackRestartEnabled", kAudioRuntimeCallbackRestartEnabled, 32);
+    AddNumberProperty(properties, "ProbeAudioRuntimeRestartInProgress", gAudioRuntimeRestartInProgress, 32);
+    AddNumberProperty(properties, "ProbeAudioRuntimeRestartLastReason", gAudioRuntimeRestartLastReason, 32);
+    AddNumberProperty(properties, "ProbeAudioRuntimeRestartLastRet", gAudioRuntimeRestartLastRet, 32);
+    AddNumberProperty(properties, "ProbeAudioRuntimeRestartLastLiveRet", gAudioRuntimeRestartLastLiveRet, 32);
+    AddNumberProperty(properties, "ProbeAudioRuntimeRestartLastDigiRunning", gAudioRuntimeRestartLastDigiRunning, 32);
+    AddNumberProperty(properties, "ProbeAudioRuntimeRestartLastDigiReady", gAudioRuntimeRestartLastDigiReady, 32);
+    AddNumberProperty(properties, "ProbeAudioRuntimeRestartLastWorkerRunning", gAudioRuntimeRestartLastWorkerRunning, 32);
+    AddNumberProperty(properties, "ProbeAudioRuntimeRestartRequestCount", gAudioRuntimeRestartRequestCount, 64);
+    AddNumberProperty(properties, "ProbeAudioRuntimeRestartDispatchCount", gAudioRuntimeRestartDispatchCount, 64);
+    AddNumberProperty(properties, "ProbeAudioRuntimeRestartSuccessCount", gAudioRuntimeRestartSuccessCount, 64);
+    AddNumberProperty(properties, "ProbeAudioRuntimeRestartSkippedCount", gAudioRuntimeRestartSkippedCount, 64);
+    AddNumberProperty(properties, "ProbeAudioRuntimeRestartBusyCount", gAudioRuntimeRestartBusyCount, 64);
     AddNumberProperty(properties, "ProbeAudioRuntimeRefreshCaptureAttemptCount", gAudioRefreshCaptureAttemptCount, 32);
     AddNumberProperty(properties, "ProbeAudioRuntimeRefreshCaptureSuccessCount", gAudioRefreshCaptureSuccessCount, 32);
     AddNumberProperty(properties, "ProbeAudioRuntimeRefreshCaptureInProgress", gAudioRefreshCaptureInProgress, 32);
@@ -4005,6 +4073,20 @@ PublishAudioRuntimeDiagnostics()
     AddNumberProperty(properties, "ProbeDigiLiveDrainBusy", gDigiLiveDrainBusy, 32);
     AddNumberProperty(properties, "ProbeDigiLiveStartRet", gDigiLiveStartRet, 32);
     AddNumberProperty(properties, "ProbeDigiLiveStopRet", gDigiLiveStopRet, 32);
+    AddNumberProperty(properties, "ProbeDigiLiveStartStage", gDigiLiveStartStage, 32);
+    AddNumberProperty(properties, "ProbeDigiLiveBeginTransactionStage", gDigiLiveBeginTransactionStage, 32);
+    AddNumberProperty(properties, "ProbeDigiLiveBeginTransactionRet", gDigiLiveBeginTransactionRet, 32);
+    AddNumberProperty(properties, "ProbeDigiLiveIsoStartStage", gDigiLiveIsoStartStage, 32);
+    AddNumberProperty(properties, "ProbeDigiLiveIsoStartRet", gDigiLiveIsoStartRet, 32);
+    AddNumberProperty(properties, "ProbeDigiLiveAsyncAttemptCount", kDigiLiveAsyncAttemptCount, 32);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveAsyncWaitLoopsPerAttempt",
+                      kDigiLiveAsyncWaitLoopsPerAttempt,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveAsyncRetrySettleMilliseconds",
+                      kDigiLiveAsyncRetrySettleMilliseconds,
+                      32);
     AddNumberProperty(properties, "ProbeDigiLiveLastHarvestRet", gDigiLiveLastHarvestRet, 32);
     AddNumberProperty(properties, "ProbeDigiLiveIRReadIndex", gDigiLiveIRReadIndex, 32);
     AddNumberProperty(properties, "ProbeDigiLiveIRCommandPtrCatchUpEnabled", kDigiLiveIRCommandPtrCatchUpEnabled, 32);
@@ -5145,6 +5227,17 @@ ConfigureAudioDevice(FireWireOHCIProbe * driver)
     gAudioStopDeviceCount = 0;
     gAudioStartDeviceObjectID = 0;
     gAudioStopDeviceObjectID = 0;
+    gAudioStartDeviceStage = 0;
+    gAudioStopDeviceStage = 0;
+    gAudioRuntimeDeviceStarted = 0;
+    gPowerStateLastFlags = 0xffffffff;
+    gPowerStateLastRet = ReturnCodeToProperty(kIOReturnNotReady);
+    gPowerStateChangeCount = 0;
+    gPowerStateOnCount = 0;
+    gPowerStateOffCount = 0;
+    gPowerStateLowCount = 0;
+    gPowerStateLiveStopCount = 0;
+    gPowerStateWakeRestartRequestCount = 0;
     gAudioDeviceStartIOCount = 0;
     gAudioDeviceStopIOCount = 0;
     gAudioOutputStreamCreateRet = ReturnCodeToProperty(kIOReturnNotReady);
@@ -5173,6 +5266,18 @@ ConfigureAudioDevice(FireWireOHCIProbe * driver)
     gAudioInputCallbackHarvestSuccessCount = 0;
     gAudioInputCallbackHarvestRet = ReturnCodeToProperty(kIOReturnNotReady);
     gAudioInputCallbackHarvestLastFillFrames = 0;
+    gAudioRuntimeRestartInProgress = 0;
+    gAudioRuntimeRestartLastReason = 0;
+    gAudioRuntimeRestartLastRet = ReturnCodeToProperty(kIOReturnNotReady);
+    gAudioRuntimeRestartLastLiveRet = ReturnCodeToProperty(kIOReturnNotReady);
+    gAudioRuntimeRestartLastDigiRunning = 0;
+    gAudioRuntimeRestartLastDigiReady = 0;
+    gAudioRuntimeRestartLastWorkerRunning = 0;
+    gAudioRuntimeRestartRequestCount = 0;
+    gAudioRuntimeRestartDispatchCount = 0;
+    gAudioRuntimeRestartSuccessCount = 0;
+    gAudioRuntimeRestartSkippedCount = 0;
+    gAudioRuntimeRestartBusyCount = 0;
     gDigiLiveStartAttemptCount = 0;
     gDigiLiveStartSuccessCount = 0;
     gDigiLiveStopAttemptCount = 0;
@@ -5186,6 +5291,11 @@ ConfigureAudioDevice(FireWireOHCIProbe * driver)
     gDigiLiveDrainBusy = 0;
     gDigiLiveStartRet = ReturnCodeToProperty(kIOReturnNotReady);
     gDigiLiveStopRet = ReturnCodeToProperty(kIOReturnNotReady);
+    gDigiLiveStartStage = 0;
+    gDigiLiveBeginTransactionStage = 0;
+    gDigiLiveBeginTransactionRet = ReturnCodeToProperty(kIOReturnNotReady);
+    gDigiLiveIsoStartStage = 0;
+    gDigiLiveIsoStartRet = ReturnCodeToProperty(kIOReturnNotReady);
     gDigiLiveLastHarvestRet = ReturnCodeToProperty(kIOReturnNotReady);
     gDigiLiveIRReadIndex = 0;
     gDigiLiveIRCommandPtrPacketIndex = 0xffffffff;
@@ -5654,6 +5764,11 @@ ConfigureAudioDevice(FireWireOHCIProbe * driver)
                 gAudioInputCallbackCount++;
                 gAudioInputLastBufferFrameSize = in_io_buffer_frame_size;
                 gAudioInputLastSampleTime = in_sample_time;
+                if (gAudioRefreshWorkerRunning == 0 ||
+                    gDigiLiveRunning == 0 ||
+                    gDigiLiveReady == 0) {
+                    RequestAudioRuntimeRestart(kAudioRuntimeRestartReasonInputCallback);
+                }
                 HarvestDigiLiveForAudioCallback(in_io_buffer_frame_size);
                 FillAudioInputBuffer(in_io_buffer_frame_size, in_sample_time);
             } else if (in_io_operation == IOUserAudioIOOperationWriteEnd &&
@@ -5662,6 +5777,11 @@ ConfigureAudioDevice(FireWireOHCIProbe * driver)
                 gAudioOutputLastBufferFrameSize = in_io_buffer_frame_size;
                 gAudioOutputLastSampleTime = in_sample_time;
                 AppendAudioOutputBufferToRing(in_io_buffer_frame_size, in_sample_time);
+                if (gAudioRefreshWorkerRunning == 0 ||
+                    gDigiLiveRunning == 0 ||
+                    gDigiLiveReady == 0) {
+                    RequestAudioRuntimeRestart(kAudioRuntimeRestartReasonOutputCallback);
+                }
                 (void)PushAudioOutputToDigiLiveTransmit();
             }
             return kIOReturnSuccess;
@@ -9224,7 +9344,10 @@ RunAsyncQuadletTransaction(IOPCIDevice * pciDevice,
                            uint32_t * responseTLabel,
                            uint32_t * responseSource,
                            uint32_t * responseRCode,
-                           uint32_t * responseData)
+                           uint32_t * responseData,
+                           uint32_t attemptCount = kAsyncReadAttemptCount,
+                           uint32_t waitLoopsPerAttempt = kAsyncReadWaitLoopsPerAttempt,
+                           uint32_t retrySettleMilliseconds = kAsyncReadRetrySettleMilliseconds)
 {
     volatile OHCIAsyncDescriptor * rxDescriptors = nullptr;
     volatile uint32_t * rxData0 = nullptr;
@@ -9232,8 +9355,11 @@ RunAsyncQuadletTransaction(IOPCIDevice * pciDevice,
     volatile OHCIAsyncDescriptor * reqRxDescriptors = nullptr;
     volatile uint32_t * reqRxData0 = nullptr;
     volatile uint32_t * reqRxData1 = nullptr;
+    diagnostics->configuredAttempts = attemptCount;
+    diagnostics->waitLoopsPerAttempt = waitLoopsPerAttempt;
+    diagnostics->retrySettleMilliseconds = retrySettleMilliseconds;
 
-    for (uint32_t attempt = 0; attempt < kAsyncReadAttemptCount; ++attempt) {
+    for (uint32_t attempt = 0; attempt < attemptCount; ++attempt) {
         StopContext(pciDevice,
                     memoryIndex,
                     kOhciAsReqTrContextControlSetOffset,
@@ -9308,7 +9434,7 @@ RunAsyncQuadletTransaction(IOPCIDevice * pciDevice,
 
         bool responseReceived = false;
         bool waitingForResponse = false;
-        for (uint32_t i = 0; i < kAsyncReadWaitLoopsPerAttempt; ++i) {
+        for (uint32_t i = 0; i < waitLoopsPerAttempt; ++i) {
             *waitLoops += 1;
             diagnostics->txDescriptorStatus = txDescriptor[0].transferStatus;
             diagnostics->rxDescriptor0ResCount = rxDescriptors[0].resCount;
@@ -9361,8 +9487,8 @@ RunAsyncQuadletTransaction(IOPCIDevice * pciDevice,
             *responseRCode == 0) {
             return true;
         }
-        if (attempt + 1 < kAsyncReadAttemptCount) {
-            IOSleep(kAsyncReadRetrySettleMilliseconds);
+        if (attempt + 1 < attemptCount) {
+            IOSleep(retrySettleMilliseconds);
         }
     }
 
@@ -9380,7 +9506,10 @@ RunDigiDuplexTransaction(IOPCIDevice * pciDevice,
                          uint32_t op,
                          uint64_t offsetLo,
                          uint32_t busValue,
-                         uint32_t tlabelBase)
+                         uint32_t tlabelBase,
+                         uint32_t attemptCount = kAsyncReadAttemptCount,
+                         uint32_t waitLoopsPerAttempt = kAsyncReadWaitLoopsPerAttempt,
+                         uint32_t retrySettleMilliseconds = kAsyncReadRetrySettleMilliseconds)
 {
     constexpr uint32_t kDigiDuplexOpRead = 0;
     constexpr uint32_t kDigiDuplexOpWrite = 1;
@@ -9425,7 +9554,10 @@ RunDigiDuplexTransaction(IOPCIDevice * pciDevice,
                                          &duplexDiagnostics->stepResponseTLabel[stepIndex],
                                          &duplexDiagnostics->stepResponseSource[stepIndex],
                                          &duplexDiagnostics->stepResponseRCode[stepIndex],
-                                         &duplexDiagnostics->stepResponseData[stepIndex]);
+                                         &duplexDiagnostics->stepResponseData[stepIndex],
+                                         attemptCount,
+                                         waitLoopsPerAttempt,
+                                         retrySettleMilliseconds);
     duplexDiagnostics->stepSuccess[stepIndex] = ok ? 1 : 0;
     if (!isWrite && ok) {
         duplexDiagnostics->stepBusValue[stepIndex] =
@@ -9736,6 +9868,7 @@ RunDigiLiveBeginTransactions()
     duplexDiagnostics.stepCount = kDigi00xDuplexStepCount;
     uint32_t tlabelBase = DigiLiveTLabelBase();
 
+    gDigiLiveBeginTransactionStage = 1;
     bool channelsWritten =
         RunDigiDuplexTransaction(gPCIDevice,
                                  gPCIMemoryIndex,
@@ -9747,7 +9880,11 @@ RunDigiLiveBeginTransactions()
                                  kDigiDuplexOpWrite,
                                  kDigi00xOffsetIsocChannels,
                                  duplexDiagnostics.sessionChannelsBusValue,
-                                 tlabelBase);
+                                 tlabelBase,
+                                 kDigiLiveAsyncAttemptCount,
+                                 kDigiLiveAsyncWaitLoopsPerAttempt,
+                                 kDigiLiveAsyncRetrySettleMilliseconds);
+    gDigiLiveBeginTransactionStage = 2;
     bool stateRead =
         RunDigiDuplexTransaction(gPCIDevice,
                                  gPCIMemoryIndex,
@@ -9759,11 +9896,15 @@ RunDigiLiveBeginTransactions()
                                  kDigiDuplexOpRead,
                                  kDigi00xOffsetStreamingState,
                                  0,
-                                 tlabelBase + kAsyncReadAttemptCount);
+                                 tlabelBase + kAsyncReadAttemptCount,
+                                 kDigiLiveAsyncAttemptCount,
+                                 kDigiLiveAsyncWaitLoopsPerAttempt,
+                                 kDigiLiveAsyncRetrySettleMilliseconds);
     if (stateRead) {
         duplexDiagnostics.initialStreamingStateBusValue = duplexDiagnostics.stepBusValue[1];
     }
 
+    gDigiLiveBeginTransactionStage = 3;
     uint32_t currentState = stateRead ? duplexDiagnostics.initialStreamingStateBusValue : 0;
     if (currentState == 0) {
         currentState = 2;
@@ -9786,9 +9927,13 @@ RunDigiLiveBeginTransactions()
                                  kDigiDuplexOpWrite,
                                  kDigi00xOffsetStreamingSet,
                                  duplexDiagnostics.beginSetFirstBusValue,
-                                 tlabelBase + (2u * kAsyncReadAttemptCount));
+                                 tlabelBase + (2u * kAsyncReadAttemptCount),
+                                 kDigiLiveAsyncAttemptCount,
+                                 kDigiLiveAsyncWaitLoopsPerAttempt,
+                                 kDigiLiveAsyncRetrySettleMilliseconds);
     IOSleep(20);
 
+    gDigiLiveBeginTransactionStage = 4;
     bool secondSet = true;
     if (duplexDiagnostics.beginSetFirstBusValue > 1) {
         duplexDiagnostics.beginSetSecondBusValue = duplexDiagnostics.beginSetFirstBusValue - 1;
@@ -9803,7 +9948,10 @@ RunDigiLiveBeginTransactions()
                                      kDigiDuplexOpWrite,
                                      kDigi00xOffsetStreamingSet,
                                      duplexDiagnostics.beginSetSecondBusValue,
-                                     tlabelBase + (3u * kAsyncReadAttemptCount));
+                                     tlabelBase + (3u * kAsyncReadAttemptCount),
+                                     kDigiLiveAsyncAttemptCount,
+                                     kDigiLiveAsyncWaitLoopsPerAttempt,
+                                     kDigiLiveAsyncRetrySettleMilliseconds);
         IOSleep(20);
     } else {
         duplexDiagnostics.beginSetSecondBusValue = 0;
@@ -9818,13 +9966,19 @@ RunDigiLiveBeginTransactions()
                                      kDigiDuplexOpSkip,
                                      kDigi00xOffsetStreamingSet,
                                      0,
-                                     tlabelBase + (3u * kAsyncReadAttemptCount));
+                                     tlabelBase + (3u * kAsyncReadAttemptCount),
+                                     kDigiLiveAsyncAttemptCount,
+                                     kDigiLiveAsyncWaitLoopsPerAttempt,
+                                     kDigiLiveAsyncRetrySettleMilliseconds);
     }
 
     CompleteDigiAsyncTransactionBuffers(gPCIDevice, gPCIMemoryIndex, &asyncDiagnostics);
-    return (channelsWritten && stateRead && firstSet && secondSet) ?
+    gDigiLiveBeginTransactionStage = 5;
+    kern_return_t ret = (channelsWritten && stateRead && firstSet && secondSet) ?
         kIOReturnSuccess :
         kIOReturnIOError;
+    gDigiLiveBeginTransactionRet = ReturnCodeToProperty(ret);
+    return ret;
 }
 
 kern_return_t
@@ -9866,7 +10020,10 @@ RunDigiLiveFinishTransactions()
                                  kDigiDuplexOpWrite,
                                  kDigi00xOffsetStreamingSet,
                                  3,
-                                 tlabelBase + (4u * kAsyncReadAttemptCount));
+                                 tlabelBase + (4u * kAsyncReadAttemptCount),
+                                 kDigiLiveAsyncAttemptCount,
+                                 kDigiLiveAsyncWaitLoopsPerAttempt,
+                                 kDigiLiveAsyncRetrySettleMilliseconds);
     bool finishChannels =
         RunDigiDuplexTransaction(gPCIDevice,
                                  gPCIMemoryIndex,
@@ -9878,7 +10035,10 @@ RunDigiLiveFinishTransactions()
                                  kDigiDuplexOpWrite,
                                  kDigi00xOffsetIsocChannels,
                                  0,
-                                 tlabelBase + (5u * kAsyncReadAttemptCount));
+                                 tlabelBase + (5u * kAsyncReadAttemptCount),
+                                 kDigiLiveAsyncAttemptCount,
+                                 kDigiLiveAsyncWaitLoopsPerAttempt,
+                                 kDigiLiveAsyncRetrySettleMilliseconds);
     IOSleep(50);
     RunDigiDuplexTransaction(gPCIDevice,
                              gPCIMemoryIndex,
@@ -9890,7 +10050,10 @@ RunDigiLiveFinishTransactions()
                              kDigiDuplexOpRead,
                              kDigi00xOffsetStreamingState,
                              0,
-                             tlabelBase + (6u * kAsyncReadAttemptCount));
+                             tlabelBase + (6u * kAsyncReadAttemptCount),
+                             kDigiLiveAsyncAttemptCount,
+                             kDigiLiveAsyncWaitLoopsPerAttempt,
+                             kDigiLiveAsyncRetrySettleMilliseconds);
     RunDigiDuplexTransaction(gPCIDevice,
                              gPCIMemoryIndex,
                              &asyncDiagnostics,
@@ -9901,7 +10064,10 @@ RunDigiLiveFinishTransactions()
                              kDigiDuplexOpRead,
                              kDigi00xOffsetIsocChannels,
                              0,
-                             tlabelBase + (7u * kAsyncReadAttemptCount));
+                             tlabelBase + (7u * kAsyncReadAttemptCount),
+                             kDigiLiveAsyncAttemptCount,
+                             kDigiLiveAsyncWaitLoopsPerAttempt,
+                             kDigiLiveAsyncRetrySettleMilliseconds);
 
     CompleteDigiAsyncTransactionBuffers(gPCIDevice, gPCIMemoryIndex, &asyncDiagnostics);
     return (finishSet && finishChannels) ? kIOReturnSuccess : kIOReturnIOError;
@@ -10056,19 +10222,25 @@ ConfigureDigiLiveReceiveDescriptors(volatile OHCIAsyncDescriptor * irDescriptor,
 kern_return_t
 StartDigiLiveIsoStream()
 {
+    gDigiLiveIsoStartStage = 1;
+    gDigiLiveIsoStartRet = ReturnCodeToProperty(kIOReturnNotReady);
     if (gPCIDevice == nullptr || gPCIMemoryIndex == 0xff) {
+        gDigiLiveIsoStartRet = ReturnCodeToProperty(kIOReturnNotReady);
         return kIOReturnNotReady;
     }
 
+    gDigiLiveIsoStartStage = 2;
     CreateUncachedDMABuffer(gPCIDevice, kDigi00xDuplexBufferSize, &gDigiLiveBuffer);
     if (gDigiLiveBuffer.result != kIOReturnSuccess ||
         gDigiLiveBuffer.segmentCount == 0 ||
         gDigiLiveBuffer.cpuRange.address == 0 ||
         gDigiLiveBuffer.dmaSegment.address > 0xffffffffull ||
         gDigiLiveBuffer.dmaSegment.length < kDigi00xDuplexBufferSize) {
+        gDigiLiveIsoStartRet = ReturnCodeToProperty(kIOReturnNoResources);
         return kIOReturnNoResources;
     }
 
+    gDigiLiveIsoStartStage = 3;
     volatile OHCIAsyncDescriptor * itDescriptor =
         reinterpret_cast<volatile OHCIAsyncDescriptor *>(gDigiLiveBuffer.cpuRange.address +
                                                         kDigi00xDuplexITDescriptorOffset);
@@ -10102,12 +10274,15 @@ StartDigiLiveIsoStream()
                                          0);
     ConfigureDigiLiveReceiveDescriptors(irDescriptor, irDescriptorDMA, irDataDMA);
 
+    gDigiLiveIsoStartStage = 4;
     gDigiLiveSyncForDeviceRet =
         ReturnCodeToProperty(SyncDMABufferForDevice(&gDigiLiveBuffer, kDigi00xDuplexBufferSize));
     if (gDigiLiveSyncForDeviceRet != ReturnCodeToProperty(kIOReturnSuccess)) {
+        gDigiLiveIsoStartRet = gDigiLiveSyncForDeviceRet;
         return static_cast<kern_return_t>(gDigiLiveSyncForDeviceRet);
     }
 
+    gDigiLiveIsoStartStage = 5;
     gPCIDevice->MemoryWrite32(gPCIMemoryIndex, kOhciIsoXmitIntMaskSetOffset, 0xffffffff);
     gPCIDevice->MemoryRead32(gPCIMemoryIndex, kOhciIsoXmitIntMaskSetOffset, &gDigiLiveXmitMaskSupport);
     gPCIDevice->MemoryWrite32(gPCIMemoryIndex, kOhciIsoXmitIntMaskClearOffset, 0xffffffff);
@@ -10120,6 +10295,7 @@ StartDigiLiveIsoStream()
     gDigiLiveRecvContextSupported = (gDigiLiveRecvMaskSupport & contextBit) != 0 ? 1 : 0;
     if (gDigiLiveXmitContextSupported == 0 || gDigiLiveRecvContextSupported == 0) {
         gDigiLiveCompleteRet = ReturnCodeToProperty(CompleteDMABufferMapping(&gDigiLiveBuffer));
+        gDigiLiveIsoStartRet = ReturnCodeToProperty(kIOReturnUnsupported);
         return kIOReturnUnsupported;
     }
     if (kOHCIInterruptDispatchEnabled != 0 &&
@@ -10128,6 +10304,7 @@ StartDigiLiveIsoStream()
         (void)ConfigureOHCIInterruptDispatch(gDriverInstance, gPCIDevice);
     }
 
+    gDigiLiveIsoStartStage = 6;
     uint64_t itControlSet = OhciIsoXmitContextControlSetOffset(kDigi00xDuplexContextIndex);
     uint64_t itControlClear = OhciIsoXmitContextControlClearOffset(kDigi00xDuplexContextIndex);
     uint64_t itCommandPtrOffset = OhciIsoXmitCommandPtrOffset(kDigi00xDuplexContextIndex);
@@ -10149,6 +10326,7 @@ StartDigiLiveIsoStream()
                 &gDigiLiveIRStopLoops,
                 &gDigiLiveIRControlAfterStop);
 
+    gDigiLiveIsoStartStage = 7;
     gDigiLiveITCommandPtr = itDescriptorDMA | kDigi00xDuplexITDescriptorsPerPacket;
     gDigiLiveIRCommandPtr = irDescriptorDMA | DigiLiveReceiveDescriptorBranchCount();
     gDigiLiveIRContextMatch = (0xfu << 28) | kDigi00xDuplexDeviceTransmitChannel;
@@ -10187,6 +10365,8 @@ StartDigiLiveIsoStream()
     if (kOHCIInterruptDispatchEnabled != 0) {
         EnableOHCIInterruptDispatch();
     }
+    gDigiLiveIsoStartStage = 8;
+    gDigiLiveIsoStartRet = ReturnCodeToProperty(kIOReturnSuccess);
     return kIOReturnSuccess;
 }
 
@@ -10203,6 +10383,11 @@ StartDigiLiveStreamForAudio()
     gDigiLiveStarting = 1;
     gDigiLiveState = kDigiLiveStateStarting;
     gDigiLiveReady = 0;
+    gDigiLiveStartStage = 1;
+    gDigiLiveBeginTransactionStage = 0;
+    gDigiLiveBeginTransactionRet = ReturnCodeToProperty(kIOReturnNotReady);
+    gDigiLiveIsoStartStage = 0;
+    gDigiLiveIsoStartRet = ReturnCodeToProperty(kIOReturnNotReady);
     gDigiLiveStartAttemptCount++;
     gDigiLiveStartRet = ReturnCodeToProperty(kIOReturnNotReady);
     gDigiLiveLastHarvestRet = ReturnCodeToProperty(kIOReturnNotReady);
@@ -10220,22 +10405,28 @@ StartDigiLiveStreamForAudio()
     ResetDigiLiveSequenceReplayState();
     ResetDigiLiveOutputState();
 
+    gDigiLiveStartStage = 2;
     kern_return_t ret = RunDigiLiveBeginTransactions();
+    gDigiLiveBeginTransactionRet = ReturnCodeToProperty(ret);
+    gDigiLiveStartStage = 3;
     if (ret == kIOReturnSuccess) {
         ret = StartDigiLiveIsoStream();
+        gDigiLiveIsoStartRet = ReturnCodeToProperty(ret);
     }
+    gDigiLiveStartStage = 4;
     if (ret == kIOReturnSuccess) {
         gDigiLiveStartSuccessCount++;
     } else {
         gDigiLiveRunning = 0;
         gDigiLiveReady = 0;
         gDigiLiveState = kDigiLiveStateStopped;
-        RunDigiLiveFinishTransactions();
-        CompleteDMABufferMapping(&gDigiLiveBuffer);
+        (void)RunDigiLiveFinishTransactions();
+        (void)CompleteDMABufferMapping(&gDigiLiveBuffer);
         ReleaseDMABuffer(&gDigiLiveBuffer);
     }
     gDigiLiveStartRet = ReturnCodeToProperty(ret);
     gDigiLiveStarting = 0;
+    gDigiLiveStartStage = ret == kIOReturnSuccess ? 5 : 6;
     PublishAudioRuntimeDiagnostics();
     return ret;
 }
@@ -11836,12 +12027,16 @@ StartAudioRefreshWorker()
 }
 
 void
-StopAudioRefreshWorker(bool waitForExit)
+StopAudioRefreshWorker(bool waitForExit, bool publishDiagnostics = true)
 {
     uint32_t expectedExitCount = gAudioRefreshWorkerDispatchCount;
+    bool workerMayBeActive =
+        gAudioRefreshWorkerRunning != 0 ||
+        gAudioRefreshCaptureInProgress != 0 ||
+        gAudioRefreshWorkerExitCount < expectedExitCount;
     gAudioRefreshWorkerRunning = 0;
     gAudioRefreshWorkerStopWaitLoops = 0;
-    if (waitForExit) {
+    if (waitForExit && workerMayBeActive) {
         while ((gAudioRefreshWorkerExitCount < expectedExitCount ||
                 gAudioRefreshCaptureInProgress != 0) &&
                gAudioRefreshWorkerStopWaitLoops < kAudioRefreshStopWaitLoopLimit) {
@@ -11849,7 +12044,85 @@ StopAudioRefreshWorker(bool waitForExit)
             IOSleep(10);
         }
     }
-    PublishAudioRuntimeDiagnostics();
+    if (publishDiagnostics && workerMayBeActive) {
+        PublishAudioRuntimeDiagnostics();
+    }
+}
+
+bool
+DigiLiveStreamMayNeedStop()
+{
+    return gDigiLiveRunning != 0 ||
+           gDigiLiveReady != 0 ||
+           gDigiLiveStarting != 0 ||
+           gDigiLiveStopping != 0 ||
+           gDigiLiveBuffer.cpuRange.address != 0 ||
+           gDigiLiveBuffer.command != nullptr;
+}
+
+void
+RequestAudioRuntimeRestart(uint32_t reason)
+{
+    if (kAudioRuntimeCallbackRestartEnabled == 0) {
+        return;
+    }
+    if (gDigiLiveRunning != 0 &&
+        gDigiLiveReady != 0 &&
+        gAudioRefreshWorkerRunning != 0) {
+        gAudioRuntimeRestartSkippedCount++;
+        return;
+    }
+    if (gAudioRefreshQueue == nullptr || gDigiLiveStarting != 0 || gDigiLiveStopping != 0) {
+        gAudioRuntimeRestartSkippedCount++;
+        return;
+    }
+    if (__sync_lock_test_and_set(&gAudioRuntimeRestartInProgress, 1) != 0) {
+        gAudioRuntimeRestartBusyCount++;
+        return;
+    }
+
+    gAudioRuntimeRestartRequestCount++;
+    gAudioRuntimeRestartLastReason = reason;
+    gAudioRuntimeRestartLastDigiRunning = gDigiLiveRunning;
+    gAudioRuntimeRestartLastDigiReady = gDigiLiveReady;
+    gAudioRuntimeRestartLastWorkerRunning = gAudioRefreshWorkerRunning;
+    gAudioRuntimeRestartLastRet = ReturnCodeToProperty(kIOReturnNotReady);
+    gAudioRuntimeRestartLastLiveRet = ReturnCodeToProperty(kIOReturnNotReady);
+
+    gAudioRefreshQueue->DispatchAsync(^{
+        gAudioRuntimeRestartDispatchCount++;
+        kern_return_t ret = kIOReturnSuccess;
+        kern_return_t liveRet = kIOReturnSuccess;
+
+        if (gDigiLiveRunning == 0 || gDigiLiveReady == 0) {
+            ResetAudioOutputRingBuffer();
+            ResetDigiLiveOutputState();
+            ClearAudioOutputBuffer();
+            liveRet = StartDigiLiveStreamForAudio();
+            gAudioRuntimeRestartLastLiveRet = ReturnCodeToProperty(liveRet);
+            if (liveRet == kIOReturnSuccess) {
+                PrebufferDigiLiveAudio();
+            } else {
+                ret = liveRet;
+            }
+        } else {
+            gAudioRuntimeRestartLastLiveRet = ReturnCodeToProperty(kIOReturnSuccess);
+        }
+
+        if (ret == kIOReturnSuccess) {
+            StartAudioRefreshWorker();
+            if (gAudioRefreshWorkerRunning == 0) {
+                ret = kIOReturnNotReady;
+            }
+        }
+
+        gAudioRuntimeRestartLastRet = ReturnCodeToProperty(ret);
+        if (ret == kIOReturnSuccess) {
+            gAudioRuntimeRestartSuccessCount++;
+        }
+        __sync_lock_release(&gAudioRuntimeRestartInProgress);
+        PublishAudioRuntimeDiagnostics();
+    });
 }
 }
 
@@ -11888,6 +12161,45 @@ IMPL(FireWireOHCIProbe, SetProperties)
     }
 
     return SetProperties(properties, SUPERDISPATCH);
+}
+
+kern_return_t
+IMPL(FireWireOHCIProbe, SetPowerState)
+{
+    gPowerStateChangeCount++;
+    gPowerStateLastFlags = powerFlags;
+
+    bool poweredOn = (powerFlags & kIOServicePowerCapabilityOn) != 0;
+    if (poweredOn) {
+        gPowerStateOnCount++;
+    } else {
+        if ((powerFlags & kIOServicePowerCapabilityLow) != 0) {
+            gPowerStateLowCount++;
+        } else {
+            gPowerStateOffCount++;
+        }
+        StopAudioRefreshWorker(true);
+        if (DigiLiveStreamMayNeedStop()) {
+            gPowerStateLiveStopCount++;
+            (void)StopDigiLiveStreamForAudio();
+        }
+        ResetAudioRingBuffer();
+        ResetAudioOutputRingBuffer();
+        ResetDigiLiveOutputState();
+        ClearAudioInputBuffer();
+        ClearAudioOutputBuffer();
+    }
+
+    kern_return_t ret = SetPowerState(powerFlags, SUPERDISPATCH);
+    gPowerStateLastRet = ReturnCodeToProperty(ret);
+
+    if (ret == kIOReturnSuccess && poweredOn && gAudioRuntimeDeviceStarted != 0) {
+        gPowerStateWakeRestartRequestCount++;
+        RequestAudioRuntimeRestart(kAudioRuntimeRestartReasonPowerOn);
+    }
+
+    PublishAudioRuntimeDiagnostics();
+    return ret;
 }
 
 kern_return_t
@@ -13448,21 +13760,39 @@ FireWireOHCIProbe::StartDevice(IOUserAudioObjectID in_object_id,
 {
     gAudioStartDeviceCount++;
     gAudioStartDeviceObjectID = in_object_id;
+    gAudioStartDeviceStage = 1;
+    gAudioStartDeviceRet = ReturnCodeToProperty(kIOReturnNotReady);
     gAudioZeroTimestampHostTime = mach_absolute_time();
-    StopAudioRefreshWorker(true);
-    StopDigiLiveStreamForAudio();
+    gAudioStartDeviceStage = 2;
+    os_log(OS_LOG_DEFAULT, "FireWireOHCIProbe: StartDevice stage 2 stopping refresh worker");
+    StopAudioRefreshWorker(true, false);
+    gAudioStartDeviceStage = 3;
+    os_log(OS_LOG_DEFAULT, "FireWireOHCIProbe: StartDevice stage 3 stopping stale live stream if present");
+    if (DigiLiveStreamMayNeedStop()) {
+        (void)StopDigiLiveStreamForAudio();
+    }
+    gAudioStartDeviceStage = 4;
+    os_log(OS_LOG_DEFAULT, "FireWireOHCIProbe: StartDevice stage 4 resetting audio rings");
     ResetAudioRingBuffer();
     ResetAudioOutputRingBuffer();
     ResetDigiLiveOutputState();
     ClearAudioInputBuffer();
     ClearAudioOutputBuffer();
+    gAudioStartDeviceStage = 5;
+    os_log(OS_LOG_DEFAULT, "FireWireOHCIProbe: StartDevice stage 5 starting live stream");
     kern_return_t liveRet = StartDigiLiveStreamForAudio();
+    gAudioStartDeviceStage = 6;
+    os_log(OS_LOG_DEFAULT, "FireWireOHCIProbe: StartDevice stage 6 live stream ret=0x%x", liveRet);
     if (liveRet != kIOReturnSuccess) {
         RefreshDigiCaptureForAudio();
     } else {
         PrebufferDigiLiveAudio();
     }
+    gAudioStartDeviceStage = 7;
+    os_log(OS_LOG_DEFAULT, "FireWireOHCIProbe: StartDevice stage 7 starting refresh worker");
     StartAudioRefreshWorker();
+    gAudioStartDeviceStage = 8;
+    os_log(OS_LOG_DEFAULT, "FireWireOHCIProbe: StartDevice stage 8 activating audio streams");
     if (gAudioDevice) {
         gAudioDevice->UpdateCurrentZeroTimestamp(0, gAudioZeroTimestampHostTime);
         gAudioStartIOThreadRet =
@@ -13477,8 +13807,15 @@ FireWireOHCIProbe::StartDevice(IOUserAudioObjectID in_object_id,
         gAudioOutputStreamActiveRet =
             ReturnCodeToProperty(gAudioOutputStream->SetStreamIsActive(true));
     }
+    gAudioStartDeviceStage = 9;
+    os_log(OS_LOG_DEFAULT, "FireWireOHCIProbe: StartDevice stage 9 calling super");
     kern_return_t ret = IOUserAudioDriver::StartDevice(in_object_id, in_flags);
     gAudioStartDeviceRet = ReturnCodeToProperty(ret);
+    if (ret == kIOReturnSuccess) {
+        gAudioRuntimeDeviceStarted = 1;
+    }
+    gAudioStartDeviceStage = 10;
+    os_log(OS_LOG_DEFAULT, "FireWireOHCIProbe: StartDevice stage 10 done ret=0x%x", ret);
     PublishAudioRuntimeDiagnostics();
     return ret;
 }
@@ -13489,6 +13826,9 @@ FireWireOHCIProbe::StopDevice(IOUserAudioObjectID in_object_id,
 {
     gAudioStopDeviceCount++;
     gAudioStopDeviceObjectID = in_object_id;
+    gAudioStopDeviceStage = 1;
+    gAudioStopDeviceRet = ReturnCodeToProperty(kIOReturnNotReady);
+    gAudioRuntimeDeviceStarted = 0;
     if (gAudioInputStream) {
         gAudioStreamActiveRet = ReturnCodeToProperty(gAudioInputStream->SetStreamIsActive(false));
     }
@@ -13496,16 +13836,26 @@ FireWireOHCIProbe::StopDevice(IOUserAudioObjectID in_object_id,
         gAudioOutputStreamActiveRet =
             ReturnCodeToProperty(gAudioOutputStream->SetStreamIsActive(false));
     }
+    gAudioStopDeviceStage = 2;
     kern_return_t ret = IOUserAudioDriver::StopDevice(in_object_id, in_flags);
     gAudioStopDeviceRet = ReturnCodeToProperty(ret);
+    gAudioStopDeviceStage = 3;
     StopAudioRefreshWorker(true);
+    gAudioStopDeviceStage = 4;
     gAudioOutputRingReadFrame = gAudioOutputRingWriteFrame;
     gAudioOutputRingPrebuffered = 0;
     UpdateAudioOutputRingFill();
-    for (uint32_t i = 0; i < kDigiLiveOutputStopSilencePushCount; ++i) {
-        (void)PushAudioOutputToDigiLiveTransmit();
+    gAudioStopDeviceStage = 5;
+    if (gDigiLiveRunning != 0) {
+        for (uint32_t i = 0; i < kDigiLiveOutputStopSilencePushCount; ++i) {
+            (void)PushAudioOutputToDigiLiveTransmit();
+        }
     }
-    StopDigiLiveStreamForAudio();
+    gAudioStopDeviceStage = 6;
+    if (DigiLiveStreamMayNeedStop()) {
+        (void)StopDigiLiveStreamForAudio();
+    }
+    gAudioStopDeviceStage = 7;
     PublishAudioRuntimeDiagnostics();
     return ret;
 }
@@ -13586,7 +13936,9 @@ kern_return_t
 IMPL(FireWireOHCIProbe, Stop)
 {
     StopAudioRefreshWorker(true);
-    StopDigiLiveStreamForAudio();
+    if (DigiLiveStreamMayNeedStop()) {
+        (void)StopDigiLiveStreamForAudio();
+    }
     ReleaseOHCIInterruptDispatch();
     IOPCIDevice * pciDevice = OSDynamicCast(IOPCIDevice, provider);
     if (pciDevice != nullptr) {

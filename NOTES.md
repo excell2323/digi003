@@ -2155,6 +2155,62 @@ Mac-driven LED/fader tests, but macOS still requires a valid
 `com.apple.developer.driverkit.userclient-access` profile before that path can
 be used outside the driver.
 
+## 0.2.176 Stronger Fader Release Hold
+
+The first throttled feedback build kept audio clean and stopped the large
+spring-back, but a few faders still drifted about 2 mm upward after release.
+`0.2.176` repeats the stored final fader value four times on touch release only.
+This should make the final motor hold more authoritative without returning to
+high-rate feedback during the drag itself.
+
+Follow-up: after an overnight idle, audio could be stuck with the DEXT alive but
+the audio refresh worker stopped. The multi-flush release hold was reverted in
+the next build, so the stable single release flush remains the baseline.
+
+## 0.2.177 Callback Restart Guard
+
+Adds an asynchronous audio-runtime restart guard. If CoreAudio begins read/write
+callbacks while the Digi live stream or refresh worker is no longer running, the
+callback only requests a restart and returns; the actual stream restart happens
+on the driver work queue. This targets the overnight/idle state where the device
+is still registered but audio no longer resumes.
+
+## 0.2.178 Sleep/Wake Runtime Guard
+
+Adds DriverKit power-state diagnostics and treats non-on power states as a hard
+audio-runtime stop: stop the refresh worker, stop the live Digi stream if a DMA
+context is still present, and clear the audio rings. On wake, if CoreAudio still
+has the device started, the driver requests the same asynchronous restart used by
+the callback guard.
+
+This build also adds start/stop stage counters and avoids an unconditional live
+stream stop at the beginning of `StartDevice()`. That protects the wake path from
+tearing down an already-stopped DMA context before the fresh stream start.
+
+## 0.2.179 StartDevice Pre-Start Deadlock Guard
+
+`0.2.178` could enter `StartDevice()` but not reach `StartDigiLiveStreamForAudio()`
+after an overnight/sleep hang. The stage counter stopped at the refresh-worker
+stop prelude while no worker was actually running. This build avoids publishing
+the large runtime diagnostics dictionary from that pre-start worker-stop path and
+adds lightweight `os_log` stage markers around `StartDevice()`.
+
+Follow-up after reboot: `0.2.179` cold-started cleanly and played audio, but the
+previous wedged state reached `StartDevice` stage 5 and then waited inside the
+Digi live start path. That points to async FireWire begin transactions after a
+bad sleep/wake state, not to the normal cold-start path.
+
+## 0.2.180 Bounded Digi Live Start
+
+Bounds the Digi live-stream begin/finish async transactions to a short timeout
+profile when they run inside CoreAudio `StartDevice()`. Normal diagnostic async
+probes keep their original longer retry budget, but the live audio start now
+fails fast instead of tying up CoreAudio for tens of seconds if the FireWire
+adapter/device is stale after sleep.
+
+Adds `ProbeDigiLiveStartStage`, begin-transaction stage/return, and ISO-start
+stage/return diagnostics so a future wake failure shows the exact sub-step.
+
 The monitor labels the confirmed insert/send position switches as `A/F` through
 `E/J`, and labels the rest of the group provisionally as `MODE/VIEW xx` until
 the two-press confirmation pass is complete.
