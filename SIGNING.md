@@ -118,3 +118,7 @@ Development alternative: the DEXT can be granted
 app connect to the driver user client. That is useful for quick local testing,
 but it is broader than the app-scoped `userclient-access` path and also
 requires a matching DEXT provisioning profile.
+
+Local development builds currently use `allow-any-userclient-access` on the
+DEXT so the CoreMIDI bridge can pass V-Control/Pro Tools feedback back to the
+driver while the app-scoped entitlement request is pending.

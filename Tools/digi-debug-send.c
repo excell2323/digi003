@@ -9,9 +9,12 @@
 enum {
     kDebugCommandMidiMessage = 1,
     kDebugCommandFaderTarget = 2,
+    kDebugCommandMidiBytes = 3,
     kDebugUserClientType = 0x44494749,
     kDebugSelectorMidiMessage = 0,
     kDebugSelectorFaderTarget = 1,
+    kDebugSelectorMidiBytes = 2,
+    kMaxMidiByteMessageLength = 512,
 };
 
 static int
@@ -63,7 +66,9 @@ usage(const char * prog)
             "usage:\n"
             "  %s fader <1-8> <0-1023>\n"
             "  %s note <group> <note> <on|off>\n"
-            "  %s raw <status> <data1> <data2> [port]\n",
+            "  %s raw <status> <data1> <data2> [port]\n"
+            "  %s bytes <port> <byte> [byte ...]\n",
+            prog,
             prog,
             prog,
             prog);
@@ -103,7 +108,7 @@ main(int argc, char ** argv)
         fprintf(stderr, "failed to allocate property dictionary\n");
         return 1;
     }
-    uint64_t scalar_input[4] = {0, 0, 0, 0};
+    uint64_t scalar_input[2 + kMaxMidiByteMessageLength] = {0};
     uint32_t scalar_input_count = 0;
     uint32_t selector = 0;
     set_u32(dict, CFSTR("ProbeControlDebugSequence"), (uint32_t)time(NULL));
@@ -183,6 +188,32 @@ main(int argc, char ** argv)
                status,
                data1,
                data2);
+    } else if (strcmp(argv[1], "bytes") == 0) {
+        uint32_t port = 0x0e;
+        if (argc < 4 ||
+            !parse_u32(argv[2], 0, 15, &port) ||
+            argc - 3 > kMaxMidiByteMessageLength) {
+            usage(argv[0]);
+            CFRelease(dict);
+            return 2;
+        }
+
+        set_u32(dict, CFSTR("ProbeControlDebugCommand"), kDebugCommandMidiBytes);
+        set_u32(dict, CFSTR("ProbeControlDebugPort"), port);
+        selector = kDebugSelectorMidiBytes;
+        scalar_input[0] = port;
+        scalar_input[1] = (uint32_t)(argc - 3);
+        scalar_input_count = 2 + (uint32_t)(argc - 3);
+        for (int i = 3; i < argc; ++i) {
+            uint32_t byte = 0;
+            if (!parse_u32(argv[i], 0, 255, &byte)) {
+                usage(argv[0]);
+                CFRelease(dict);
+                return 2;
+            }
+            scalar_input[2 + (i - 3)] = byte;
+        }
+        printf("queue bytes port=0x%x len=%u\n", port, (uint32_t)(argc - 3));
     } else {
         usage(argv[0]);
         CFRelease(dict);
@@ -207,10 +238,10 @@ main(int argc, char ** argv)
                                         NULL);
         IOServiceClose(connect);
     }
-    if (ret != KERN_SUCCESS) {
+    if (ret != KERN_SUCCESS && selector != kDebugSelectorMidiBytes) {
         ret = IORegistryEntrySetCFProperties(service, dict);
     }
-    if (ret == KERN_SUCCESS) {
+    if (ret == KERN_SUCCESS && selector != kDebugSelectorMidiBytes) {
         if (selector == kDebugSelectorFaderTarget) {
             ret = set_u32_property(service, CFSTR("ProbeControlDebugCommand"), kDebugCommandFaderTarget);
             if (ret == KERN_SUCCESS) {

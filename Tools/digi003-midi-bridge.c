@@ -14,6 +14,8 @@ enum {
     kControlPort = 0x0e,
     kDebugUserClientType = 0x44494749,
     kDebugSelectorMidiMessage = 0,
+    kDebugSelectorMidiBytes = 2,
+    kMaxRawMidiBytesPerCall = 14,
     kDecodedRecentCapacity = 256,
 };
 
@@ -21,12 +23,23 @@ static const char *kDefaultPortName = "Avid 003 Port 3 (Control)";
 
 static volatile sig_atomic_t g_should_stop = 0;
 static io_service_t g_probe_service = IO_OBJECT_NULL;
+static io_connect_t g_debug_connect = IO_OBJECT_NULL;
 static bool g_verbose = false;
+static bool g_forward_feedback_to_driver = true;
+static FILE *g_feedback_log = NULL;
 
 static void handle_signal(int signo)
 {
     (void)signo;
     g_should_stop = 1;
+}
+
+static void close_debug_connection(void)
+{
+    if (g_debug_connect != IO_OBJECT_NULL) {
+        IOServiceClose(g_debug_connect);
+        g_debug_connect = IO_OBJECT_NULL;
+    }
 }
 
 static int parse_u32(const char *text, uint32_t min_value, uint32_t max_value, uint32_t *value)
@@ -137,27 +150,118 @@ static void send_coremidi_message(MIDIEndpointRef source, uint8_t status, uint8_
     }
 }
 
-static kern_return_t send_debug_midi(uint32_t port, uint32_t status, uint32_t data1, uint32_t data2)
+static void print_midi_bytes(FILE *stream, const char *prefix, const uint8_t *bytes, UInt16 length)
 {
+    if (stream == NULL || bytes == NULL) {
+        return;
+    }
+
+    fprintf(stream, "%s len=%u:", prefix, length);
+    UInt16 limit = length;
+    if (limit > 256) {
+        limit = 256;
+    }
+    for (UInt16 i = 0; i < limit; ++i) {
+        fprintf(stream, " %02x", bytes[i]);
+    }
+    if (limit < length) {
+        fprintf(stream, " ...");
+    }
+
+    bool has_printable = false;
+    for (UInt16 i = 0; i < limit; ++i) {
+        if (bytes[i] >= 0x20u && bytes[i] <= 0x7eu) {
+            has_printable = true;
+            break;
+        }
+    }
+    if (has_printable) {
+        fprintf(stream, " |");
+        for (UInt16 i = 0; i < limit; ++i) {
+            uint8_t byte = bytes[i];
+            fputc((byte >= 0x20u && byte <= 0x7eu) ? byte : '.', stream);
+        }
+        if (limit < length) {
+            fprintf(stream, "...");
+        }
+        fprintf(stream, "|");
+    }
+    fprintf(stream, "\n");
+    fflush(stream);
+}
+
+static kern_return_t ensure_debug_connection(void)
+{
+    if (!g_forward_feedback_to_driver) {
+        return kIOReturnOffline;
+    }
     if (g_probe_service == IO_OBJECT_NULL) {
         return kIOReturnNotFound;
     }
+    if (g_debug_connect != IO_OBJECT_NULL) {
+        return KERN_SUCCESS;
+    }
 
-    io_connect_t connect = IO_OBJECT_NULL;
-    kern_return_t ret = IOServiceOpen(g_probe_service, mach_task_self(), kDebugUserClientType, &connect);
+    return IOServiceOpen(g_probe_service, mach_task_self(), kDebugUserClientType, &g_debug_connect);
+}
+
+static kern_return_t send_debug_midi(uint32_t port, uint32_t status, uint32_t data1, uint32_t data2)
+{
+    kern_return_t ret = ensure_debug_connection();
     if (ret != KERN_SUCCESS) {
         return ret;
     }
 
     uint64_t scalar_input[4] = {port, status, data1, data2};
-    ret = IOConnectCallScalarMethod(connect,
+    ret = IOConnectCallScalarMethod(g_debug_connect,
                                     kDebugSelectorMidiMessage,
                                     scalar_input,
                                     4,
                                     NULL,
                                     NULL);
-    IOServiceClose(connect);
+    if (ret != KERN_SUCCESS) {
+        close_debug_connection();
+    }
     return ret;
+}
+
+static kern_return_t send_debug_midi_bytes(uint32_t port, const uint8_t *bytes, UInt16 length)
+{
+    if (bytes == NULL || length == 0) {
+        return kIOReturnBadArgument;
+    }
+
+    UInt16 offset = 0;
+    while (offset < length) {
+        UInt16 chunk = length - offset;
+        if (chunk > kMaxRawMidiBytesPerCall) {
+            chunk = kMaxRawMidiBytesPerCall;
+        }
+
+        kern_return_t ret = ensure_debug_connection();
+        if (ret != KERN_SUCCESS) {
+            return ret;
+        }
+
+        uint64_t scalar_input[2 + kMaxRawMidiBytesPerCall] = {port, chunk};
+        for (UInt16 i = 0; i < chunk; ++i) {
+            scalar_input[2 + i] = bytes[offset + i];
+        }
+        ret = IOConnectCallScalarMethod(g_debug_connect,
+                                        kDebugSelectorMidiBytes,
+                                        scalar_input,
+                                        2 + chunk,
+                                        NULL,
+                                        NULL);
+        if (ret != KERN_SUCCESS) {
+            close_debug_connection();
+            return ret;
+        }
+
+        offset += chunk;
+    }
+
+    return KERN_SUCCESS;
 }
 
 static int midi_message_length(uint8_t status)
@@ -179,13 +283,41 @@ static void midi_read_proc(const MIDIPacketList *packet_list, void *read_proc_re
 
     const MIDIPacket *packet = &packet_list->packet[0];
     for (UInt32 packet_index = 0; packet_index < packet_list->numPackets; ++packet_index) {
+        if (g_verbose) {
+            print_midi_bytes(stdout, "from CoreMIDI raw", packet->data, packet->length);
+        }
+        if (g_feedback_log != NULL) {
+            print_midi_bytes(g_feedback_log, "from CoreMIDI raw", packet->data, packet->length);
+        }
+
+        if (packet->length > 0 && packet->data[0] == 0xf0u) {
+            kern_return_t ret = send_debug_midi_bytes(kControlPort, packet->data, packet->length);
+            if (g_verbose) {
+                printf("from CoreMIDI sysex len=%u -> driver ret=0x%08x%s\n",
+                       packet->length,
+                       ret,
+                       g_forward_feedback_to_driver ? "" : " (disabled)");
+                fflush(stdout);
+            }
+            if (ret != KERN_SUCCESS && g_forward_feedback_to_driver) {
+                fprintf(stderr,
+                        "bridge: failed to send MIDI sysex feedback to driver: 0x%08x (%s)\n",
+                        ret,
+                        mach_error_string(ret));
+            }
+        }
+
         uint8_t running_status = 0;
         UInt16 i = 0;
         while (i < packet->length) {
             uint8_t status = packet->data[i];
             if ((status & 0x80u) != 0) {
-                running_status = status;
                 ++i;
+                if (status < 0xf0u) {
+                    running_status = status;
+                } else {
+                    running_status = 0;
+                }
             } else if (running_status != 0) {
                 status = running_status;
             } else {
@@ -215,14 +347,15 @@ static void midi_read_proc(const MIDIPacketList *packet_list, void *read_proc_re
 
             kern_return_t ret = send_debug_midi(kControlPort, status, data1, data2);
             if (g_verbose) {
-                printf("from CoreMIDI: %02x %02x %02x -> driver ret=0x%08x\n",
+                printf("from CoreMIDI msg: %02x %02x %02x -> driver ret=0x%08x%s\n",
                        status,
                        data1,
                        data2,
-                       ret);
+                       ret,
+                       g_forward_feedback_to_driver ? "" : " (disabled)");
                 fflush(stdout);
             }
-            if (ret != KERN_SUCCESS) {
+            if (ret != KERN_SUCCESS && g_forward_feedback_to_driver) {
                 fprintf(stderr,
                         "bridge: failed to send MIDI feedback to driver: 0x%08x (%s)\n",
                         ret,
@@ -236,7 +369,9 @@ static void midi_read_proc(const MIDIPacketList *packet_list, void *read_proc_re
 static void usage(const char *prog)
 {
     fprintf(stderr,
-            "usage: %s [--name \"Avid 003 Port 3 (Control)\"] [--poll-ms 5] [--include-existing] [--verbose]\n",
+            "usage: %s [--name \"Avid 003 Port 3 (Control)\"] [--poll-ms 5]\n"
+            "          [--include-existing] [--verbose] [--feedback-log path]\n"
+            "          [--no-driver-feedback]\n",
             prog);
 }
 
@@ -258,6 +393,14 @@ int main(int argc, char **argv)
             include_existing = true;
         } else if (strcmp(argv[i], "--verbose") == 0) {
             g_verbose = true;
+        } else if (strcmp(argv[i], "--feedback-log") == 0 && i + 1 < argc) {
+            g_feedback_log = fopen(argv[++i], "a");
+            if (g_feedback_log == NULL) {
+                perror("bridge: failed to open feedback log");
+                return 1;
+            }
+        } else if (strcmp(argv[i], "--no-driver-feedback") == 0) {
+            g_forward_feedback_to_driver = false;
         } else {
             usage(argv[0]);
             return 2;
@@ -384,6 +527,10 @@ int main(int argc, char **argv)
     MIDIEndpointDispose(source);
     MIDIEndpointDispose(destination);
     MIDIClientDispose(client);
+    close_debug_connection();
+    if (g_feedback_log != NULL) {
+        fclose(g_feedback_log);
+    }
     IOObjectRelease(g_probe_service);
     printf("bridge: stopped\n");
     return 0;

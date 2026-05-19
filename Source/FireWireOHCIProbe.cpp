@@ -306,9 +306,12 @@ constexpr uint32_t kDigiLiveControlMotorTestLowTarget10 = 256;
 constexpr uint32_t kDigiLiveControlMotorTestHighTarget10 = 768;
 constexpr uint32_t kDigiLiveControlDebugCommandMidiMessage = 1;
 constexpr uint32_t kDigiLiveControlDebugCommandFaderTarget = 2;
+constexpr uint32_t kDigiLiveControlDebugCommandMidiBytes = 3;
 constexpr uint32_t kFireWireOHCIProbeDebugUserClientType = 0x44494749;
 constexpr uint64_t kDigiLiveControlDebugSelectorMidiMessage = 0;
 constexpr uint64_t kDigiLiveControlDebugSelectorFaderTarget = 1;
+constexpr uint64_t kDigiLiveControlDebugSelectorMidiBytes = 2;
+constexpr uint32_t kDigiLiveControlDebugMaxByteMessageLength = 512;
 constexpr uint32_t kDigi00xDuplexCIPSFC44100 = 1;
 constexpr uint32_t kDigi00xCIPDBCMask = 0x000000ff;
 constexpr uint32_t kDigi00xCIPSYTMask = 0x0000ffff;
@@ -2666,6 +2669,41 @@ QueueDigiLiveMidiMessageToOutput(uint32_t portNibble,
 }
 
 bool
+QueueDigiLiveMidiBytesToOutput(uint32_t portNibble,
+                               const uint8_t * bytes,
+                               uint32_t byteCount)
+{
+    if (portNibble >= kDigiLiveMidiPortCount ||
+        bytes == nullptr ||
+        byteCount == 0 ||
+        byteCount > kDigiLiveControlDebugMaxByteMessageLength) {
+        return false;
+    }
+
+    uint32_t wordCount = (byteCount + 1u) / 2u;
+    if (wordCount > kDigiLiveControlDebugMaxByteMessageLength / 2u) {
+        return false;
+    }
+
+    uint32_t words[kDigiLiveControlDebugMaxByteMessageLength / 2u] = {};
+    for (uint32_t byteIndex = 0, wordIndex = 0; byteIndex < byteCount; ++wordIndex) {
+        uint32_t remaining = byteCount - byteIndex;
+        uint32_t fragmentLength = remaining >= 2u ? 2u : 1u;
+        uint32_t control = ((portNibble & 0x0fu) << 4) | fragmentLength;
+        uint32_t word = 0x80000000u |
+                        (static_cast<uint32_t>(bytes[byteIndex]) << 16) |
+                        control;
+        if (fragmentLength == 2u) {
+            word |= static_cast<uint32_t>(bytes[byteIndex + 1u]) << 8;
+        }
+        words[wordIndex] = word;
+        byteIndex += fragmentLength;
+    }
+
+    return AppendDigiLiveMidiEchoWordsBE(words, wordCount);
+}
+
+bool
 QueueDigiLiveFaderMoveFeedback(uint32_t channel, uint8_t cc, uint8_t value, bool force)
 {
     if (kDigiLiveMidiEchoFaderMoveFeedbackEnabled == 0) {
@@ -2845,6 +2883,45 @@ QueueDigiLiveControlDebugMidiCommand(uint32_t portNibble,
                                                    static_cast<uint8_t>(status),
                                                    static_cast<uint8_t>(data1),
                                                    static_cast<uint8_t>(data2));
+    if (queued) {
+        gDigiLiveControlDebugMessageCount++;
+        gDigiLiveControlDebugLastRet = static_cast<uint32_t>(kIOReturnSuccess);
+        PublishDigiLiveControlDebugDiagnostics();
+        return kIOReturnSuccess;
+    }
+
+    gDigiLiveControlDebugSkippedCount++;
+    gDigiLiveControlDebugLastRet = static_cast<uint32_t>(kIOReturnNoResources);
+    PublishDigiLiveControlDebugDiagnostics();
+    return kIOReturnNoResources;
+}
+
+kern_return_t
+QueueDigiLiveControlDebugMidiBytes(uint32_t portNibble,
+                                   const uint8_t * bytes,
+                                   uint32_t byteCount)
+{
+    gDigiLiveControlDebugCommandCount++;
+    gDigiLiveControlDebugLastCommand = kDigiLiveControlDebugCommandMidiBytes;
+    gDigiLiveControlDebugLastRet = static_cast<uint32_t>(kIOReturnBadArgument);
+
+    if (portNibble >= kDigiLiveMidiPortCount ||
+        bytes == nullptr ||
+        byteCount == 0 ||
+        byteCount > kDigiLiveControlDebugMaxByteMessageLength) {
+        gDigiLiveControlDebugSkippedCount++;
+        PublishDigiLiveControlDebugDiagnostics();
+        return kIOReturnBadArgument;
+    }
+
+    gDigiLiveControlDebugLastPort = portNibble;
+    gDigiLiveControlDebugLastStatus = bytes[0];
+    gDigiLiveControlDebugLastData1 = byteCount > 1u ? bytes[1] : 0;
+    gDigiLiveControlDebugLastData2 = byteCount > 2u ? bytes[2] : 0;
+    gDigiLiveControlDebugLastFaderChannel = 0xffffffff;
+    gDigiLiveControlDebugLastFaderTarget10 = byteCount;
+
+    bool queued = QueueDigiLiveMidiBytesToOutput(portNibble, bytes, byteCount);
     if (queued) {
         gDigiLiveControlDebugMessageCount++;
         gDigiLiveControlDebugLastRet = static_cast<uint32_t>(kIOReturnSuccess);
@@ -12437,6 +12514,48 @@ FireWireOHCIProbeDebugUserClient::ExternalMethod(uint64_t selector,
         return QueueDigiLiveControlDebugFaderTarget(
             static_cast<uint32_t>(arguments->scalarInput[0]),
             static_cast<uint32_t>(arguments->scalarInput[1]));
+    }
+
+    if (selector == kDigiLiveControlDebugSelectorMidiBytes) {
+        if (arguments->scalarInputCount < 1) {
+            return kIOReturnBadArgument;
+        }
+
+        uint32_t portNibble = static_cast<uint32_t>(arguments->scalarInput[0]);
+        if (arguments->structureInput != nullptr) {
+            size_t byteCount = arguments->structureInput->getLength();
+            const void * bytes = arguments->structureInput->getBytesNoCopy();
+            if (bytes != nullptr &&
+                byteCount > 0 &&
+                byteCount <= kDigiLiveControlDebugMaxByteMessageLength) {
+                return QueueDigiLiveControlDebugMidiBytes(
+                    portNibble,
+                    reinterpret_cast<const uint8_t *>(bytes),
+                    static_cast<uint32_t>(byteCount));
+            }
+        }
+
+        if (arguments->scalarInputCount < 2) {
+            return kIOReturnBadArgument;
+        }
+
+        uint32_t byteCount = static_cast<uint32_t>(arguments->scalarInput[1]);
+        if (byteCount == 0 ||
+            byteCount > kDigiLiveControlDebugMaxByteMessageLength ||
+            arguments->scalarInputCount < 2u + byteCount) {
+            return kIOReturnBadArgument;
+        }
+
+        uint8_t bytes[kDigiLiveControlDebugMaxByteMessageLength] = {};
+        for (uint32_t i = 0; i < byteCount; ++i) {
+            uint64_t byte = arguments->scalarInput[2u + i];
+            if (byte > 0xffu) {
+                return kIOReturnBadArgument;
+            }
+            bytes[i] = static_cast<uint8_t>(byte);
+        }
+
+        return QueueDigiLiveControlDebugMidiBytes(portNibble, bytes, byteCount);
     }
 
     return kIOReturnUnsupported;

@@ -120,9 +120,24 @@ Setup > Peripherals > MIDI Controllers:
 ```
 
 The bridge currently forwards Digi 003 button/fader/encoder messages to
-CoreMIDI. Reverse DAW feedback to LEDs, displays, and motor faders still needs
-a signed helper or driver-side feedback mailbox because unsigned command-line
-tools cannot open the DriverKit debug user client on this system.
+CoreMIDI. Reverse DAW feedback to LEDs, displays, and motor faders requires the
+DEXT to be signed with `com.apple.developer.driverkit.allow-any-userclient-access`
+or the bridge app/helper to be signed with `com.apple.developer.driverkit.userclient-access`.
+By default, `scripts/start-midi-bridge.sh` still starts the bridge with
+DriverKit feedback disabled while logging incoming DAW feedback to:
+
+```text
+~/Library/Logs/FireWireOHCIProbe/digi003-midi-feedback.log
+```
+
+To test DAW feedback after installing a DEXT with user-client access enabled:
+
+```sh
+FEEDBACK_TO_DRIVER=1 ./scripts/start-midi-bridge.sh
+```
+
+With feedback enabled, the bridge forwards standard 3-byte MIDI messages for
+LED and fader state plus raw SysEx byte packets for Digi 003 display updates.
 
 ## Next Milestones
 

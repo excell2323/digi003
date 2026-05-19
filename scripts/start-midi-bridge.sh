@@ -8,6 +8,7 @@ POLL_MS="${POLL_MS:-5}"
 LAUNCH_AGENTS_DIR="$HOME/Library/LaunchAgents"
 PLIST="$LAUNCH_AGENTS_DIR/$LABEL.plist"
 LOG_DIR="$HOME/Library/Logs/FireWireOHCIProbe"
+FEEDBACK_TO_DRIVER="${FEEDBACK_TO_DRIVER:-0}"
 
 if [ ! -x "$BRIDGE" ]; then
     "$PROJECT_DIR/scripts/build-tools.sh"
@@ -17,6 +18,12 @@ mkdir -p "$LAUNCH_AGENTS_DIR" "$LOG_DIR"
 
 launchctl bootout "gui/$(id -u)" "$PLIST" 2>/dev/null || true
 launchctl remove "$LABEL" 2>/dev/null || true
+
+if [ "$FEEDBACK_TO_DRIVER" = "1" ]; then
+    FEEDBACK_ARG=""
+else
+    FEEDBACK_ARG="<string>--no-driver-feedback</string>"
+fi
 
 cat > "$PLIST" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -31,6 +38,9 @@ cat > "$PLIST" <<EOF
     <string>$BRIDGE</string>
     <string>--poll-ms</string>
     <string>$POLL_MS</string>
+    $FEEDBACK_ARG
+    <string>--feedback-log</string>
+    <string>$LOG_DIR/digi003-midi-feedback.log</string>
   </array>
   <key>RunAtLoad</key>
   <true/>

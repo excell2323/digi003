@@ -53,7 +53,8 @@ dext_profile="$(
     find_profile \
         "$DEXT_APP_ID" \
         "com.apple.developer.driverkit.transport.pci" \
-        "com.apple.developer.driverkit.family.audio" |
+        "com.apple.developer.driverkit.family.audio" \
+        "com.apple.developer.driverkit.allow-any-userclient-access" |
     head -n 1 || true
 )"
 
@@ -63,7 +64,7 @@ if [ -z "$host_profile" ]; then
 fi
 
 if [ -z "$dext_profile" ]; then
-    echo "Missing provisioning profile for $DEXT_APP_ID with com.apple.developer.driverkit.transport.pci and com.apple.developer.driverkit.family.audio" >&2
+    echo "Missing provisioning profile for $DEXT_APP_ID with PCI, Audio, and allow-any-userclient-access DriverKit entitlements" >&2
     exit 1
 fi
 
