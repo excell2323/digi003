@@ -7,6 +7,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+static const double kDigiSampleRate = 48000.0;
+
 typedef struct PlayerState {
     AudioQueueRef queue;
     UInt32 framesWritten;
@@ -158,11 +160,11 @@ int main(int argc, char **argv) {
     }
 
     PlayerState state = {};
-    state.toneFrames = (UInt32)(44100.0 * seconds);
-    state.fadeFrames = (UInt32)((44100.0 * fadeMs) / 1000.0);
-    state.tailFrames = (UInt32)((44100.0 * tailMs) / 1000.0);
+    state.toneFrames = (UInt32)(kDigiSampleRate * seconds);
+    state.fadeFrames = (UInt32)((kDigiSampleRate * fadeMs) / 1000.0);
+    state.tailFrames = (UInt32)((kDigiSampleRate * tailMs) / 1000.0);
     state.totalFrames = state.toneFrames + state.fadeFrames + state.tailFrames;
-    state.phaseStep = (2.0 * M_PI * frequency) / 44100.0;
+    state.phaseStep = (2.0 * M_PI * frequency) / kDigiSampleRate;
 
     CFStringRef uid = NULL;
     OSStatus err = find_digi_device_uid(&uid);
@@ -172,7 +174,7 @@ int main(int argc, char **argv) {
     }
 
     AudioStreamBasicDescription asbd = {};
-    asbd.mSampleRate = 44100.0;
+    asbd.mSampleRate = kDigiSampleRate;
     asbd.mFormatID = kAudioFormatLinearPCM;
     asbd.mFormatFlags = kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked;
     asbd.mBytesPerPacket = 8 * 4;
@@ -217,7 +219,7 @@ int main(int argc, char **argv) {
         return 7;
     }
 
-    double totalSeconds = (double)state.totalFrames / 44100.0;
+    double totalSeconds = (double)state.totalFrames / kDigiSampleRate;
     CFRunLoopRunInMode(kCFRunLoopDefaultMode, totalSeconds + 1.0, false);
     AudioQueueStop(state.queue, true);
     AudioQueueDispose(state.queue, true);

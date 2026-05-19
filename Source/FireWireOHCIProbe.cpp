@@ -201,7 +201,7 @@ constexpr size_t kConfigROMProbeDetailedCount = 16;
 constexpr size_t kDigi00xRegisterProbeCount = 10;
 constexpr size_t kDigi00xWritePlanCount = 5;
 constexpr size_t kDigi00xStateSequenceStepCount = 8;
-constexpr size_t kDigi00xDuplexStepCount = 8;
+constexpr size_t kDigi00xDuplexStepCount = 9;
 constexpr uint32_t kIsoTestEnabled = 1;
 constexpr uint32_t kIsoTestContextIndex = 0;
 constexpr uint32_t kIsoTestChannel = 63;
@@ -312,7 +312,15 @@ constexpr uint64_t kDigiLiveControlDebugSelectorMidiMessage = 0;
 constexpr uint64_t kDigiLiveControlDebugSelectorFaderTarget = 1;
 constexpr uint64_t kDigiLiveControlDebugSelectorMidiBytes = 2;
 constexpr uint32_t kDigiLiveControlDebugMaxByteMessageLength = 512;
+constexpr uint32_t kDigi00xDuplexSampleRate44100 = 44100;
+constexpr uint32_t kDigi00xDuplexSampleRate48000 = 48000;
+constexpr uint32_t kDigi00xDuplexActiveSampleRate = kDigi00xDuplexSampleRate48000;
+constexpr uint32_t kDigi00xDuplexLocalRateIndex44100 = 0;
+constexpr uint32_t kDigi00xDuplexLocalRateIndex48000 = 1;
+constexpr uint32_t kDigi00xDuplexActiveLocalRateIndex = kDigi00xDuplexLocalRateIndex48000;
 constexpr uint32_t kDigi00xDuplexCIPSFC44100 = 1;
+constexpr uint32_t kDigi00xDuplexCIPSFC48000 = 2;
+constexpr uint32_t kDigi00xDuplexActiveCIPSFC = kDigi00xDuplexCIPSFC48000;
 constexpr uint32_t kDigi00xCIPDBCMask = 0x000000ff;
 constexpr uint32_t kDigi00xCIPSYTMask = 0x0000ffff;
 constexpr uint32_t kDigi00xCIPFMTAM824 = 0x10;
@@ -365,7 +373,7 @@ constexpr size_t kDigi00xDuplexIRChannelSampleChannelCount = kDigi00xDuplexPCMAu
 constexpr size_t kDigi00xDuplexIRCaptureSummaryChannelCount = kDigi00xDuplexPCMAudioChannels;
 constexpr size_t kDigi00xDuplexIRCapturePCMFrameLimit = 8192;
 constexpr size_t kDigi00xDuplexIRCapturePCMChannelCount = 8;
-constexpr uint32_t kDigi00xDuplexIRCaptureSampleRate = 44100;
+constexpr uint32_t kDigi00xDuplexIRCaptureSampleRate = kDigi00xDuplexActiveSampleRate;
 constexpr uint32_t kDigi00xDuplexAM824AudioLabel = 0x40;
 constexpr uint32_t kAudioDeviceZeroTimestampPeriod = 128;
 constexpr uint32_t kAudioInputBufferFrameCount = 8192;
@@ -411,7 +419,8 @@ constexpr uint32_t kDigiLiveSequenceReplayMovingGuardMinStartDistancePackets = 4
 constexpr uint32_t kDigiLiveSequenceReplayMovingQueuePackets = 512;
 constexpr uint32_t kDigiLiveSequenceReplayMovingUpdatePackets = 80;
 constexpr uint32_t kDigiLiveSequenceReplayMovingLeadPackets = 4096;
-constexpr uint32_t kDigiLiveSequenceReplayPeriodDataBlocks44100 = 441;
+constexpr uint32_t kDigiLiveSequenceReplayPeriodDataBlocks =
+    kDigi00xDuplexActiveSampleRate / 100u;
 constexpr uint32_t kDigiLiveOutputPayloadUpdateEnabled = 1;
 constexpr uint32_t kDigiLiveOutputLeadPackets = 1024;
 constexpr uint32_t kDigiLiveOutputServiceAheadPackets = 64;
@@ -3404,7 +3413,7 @@ RecordDigiLiveRxCadencePacket(uint32_t eventCount, bool continuous)
     gDigiLiveRxCadencePeriodCount++;
     if (gDigiLiveRxCadencePeriodCount >= kDigiLiveRxCadencePeriodPackets) {
         if (gDigiLiveRxCadenceObservedTotalDataBlocks ==
-            kDigiLiveSequenceReplayPeriodDataBlocks44100) {
+            kDigiLiveSequenceReplayPeriodDataBlocks) {
             uint32_t bestMismatchCount = 0xffffffff;
             uint32_t bestPhase = 0xffffffff;
             for (uint32_t phase = 0; phase < kDigiLiveRxCadencePeriodPackets; ++phase) {
@@ -3507,7 +3516,7 @@ UpdateDigiLiveReceiveTimingDiagnostics(volatile uint32_t * packetHeader,
     if (payloadRemainder == 0 &&
         cip.dbs == kDigi00xDuplexDataBlockQuadlets &&
         cip.fmt == kDigi00xCIPFMTAM824 &&
-        cip.fdf == kDigi00xDuplexCIPSFC44100 &&
+        cip.fdf == kDigi00xDuplexActiveCIPSFC &&
         cip.sph == 0) {
         gDigiLiveRxStreamProcessorValidPacketCount++;
     }
@@ -3528,7 +3537,7 @@ UpdateDigiLiveReceiveTimingDiagnostics(volatile uint32_t * packetHeader,
     if (cip.fmt != kDigi00xCIPFMTAM824) {
         gDigiLiveRxUnexpectedFMTCount++;
     }
-    if (cip.fdf != kDigi00xDuplexCIPSFC44100) {
+    if (cip.fdf != kDigi00xDuplexActiveCIPSFC) {
         gDigiLiveRxUnexpectedFDFCount++;
     }
     if (eventCount < gDigiLiveRxMinEventCount) {
@@ -4200,6 +4209,9 @@ PublishAudioRuntimeDiagnostics()
     AddNumberProperty(properties, "ProbeAudioRuntimeRefreshWorkerLivePublishSkipCount", gAudioRefreshWorkerLivePublishSkipCount, 64);
     AddNumberProperty(properties, "ProbeAudioRuntimeRefreshWorkerBacklogNoSleepCount", gAudioRefreshWorkerBacklogNoSleepCount, 64);
     AddNumberProperty(properties, "ProbeAudioRuntimeRefreshWorkerLowWaterNoSleepCount", gAudioRefreshWorkerLowWaterNoSleepCount, 64);
+    AddNumberProperty(properties, "ProbeAudioRuntimeSampleRate", kDigi00xDuplexActiveSampleRate, 32);
+    AddNumberProperty(properties, "ProbeAudioRuntimeDigiLocalRateIndex", kDigi00xDuplexActiveLocalRateIndex, 32);
+    AddNumberProperty(properties, "ProbeAudioRuntimeCIPSFC", kDigi00xDuplexActiveCIPSFC, 32);
     AddNumberProperty(properties, "ProbeAudioRuntimeInputCallbackHarvestEnabled", kAudioCallbackHarvestEnabled, 32);
     AddNumberProperty(properties, "ProbeAudioRuntimeInputCallbackHarvestAttemptCount", gAudioInputCallbackHarvestAttemptCount, 32);
     AddNumberProperty(properties, "ProbeAudioRuntimeInputCallbackHarvestSuccessCount", gAudioInputCallbackHarvestSuccessCount, 32);
@@ -4690,8 +4702,8 @@ PublishAudioRuntimeDiagnostics()
                       kDigiLiveSequenceReplayMovingLeadPackets,
                       32);
     AddNumberProperty(properties,
-                      "ProbeDigiLiveSequenceReplayPeriodDataBlocks44100",
-                      kDigiLiveSequenceReplayPeriodDataBlocks44100,
+                      "ProbeDigiLiveSequenceReplayPeriodDataBlocks",
+                      kDigiLiveSequenceReplayPeriodDataBlocks,
                       32);
     AddNumberProperty(properties,
                       "ProbeDigiLiveSequenceReplayMovingQueueReadIndex",
@@ -6941,6 +6953,7 @@ AddDigiDuplexDiagnostics(OSDictionary * properties,
         "ProbeDigiDuplexStep5Op",
         "ProbeDigiDuplexStep6Op",
         "ProbeDigiDuplexStep7Op",
+        "ProbeDigiDuplexStep8Op",
     };
     const char * offsetNames[kDigi00xDuplexStepCount] = {
         "ProbeDigiDuplexStep0Offset",
@@ -6951,6 +6964,7 @@ AddDigiDuplexDiagnostics(OSDictionary * properties,
         "ProbeDigiDuplexStep5Offset",
         "ProbeDigiDuplexStep6Offset",
         "ProbeDigiDuplexStep7Offset",
+        "ProbeDigiDuplexStep8Offset",
     };
     const char * busValueNames[kDigi00xDuplexStepCount] = {
         "ProbeDigiDuplexStep0BusValue",
@@ -6961,6 +6975,7 @@ AddDigiDuplexDiagnostics(OSDictionary * properties,
         "ProbeDigiDuplexStep5BusValue",
         "ProbeDigiDuplexStep6BusValue",
         "ProbeDigiDuplexStep7BusValue",
+        "ProbeDigiDuplexStep8BusValue",
     };
     const char * successNames[kDigi00xDuplexStepCount] = {
         "ProbeDigiDuplexStep0Success",
@@ -6971,6 +6986,7 @@ AddDigiDuplexDiagnostics(OSDictionary * properties,
         "ProbeDigiDuplexStep5Success",
         "ProbeDigiDuplexStep6Success",
         "ProbeDigiDuplexStep7Success",
+        "ProbeDigiDuplexStep8Success",
     };
     const char * rcodeNames[kDigi00xDuplexStepCount] = {
         "ProbeDigiDuplexStep0ResponseRCode",
@@ -6981,6 +6997,7 @@ AddDigiDuplexDiagnostics(OSDictionary * properties,
         "ProbeDigiDuplexStep5ResponseRCode",
         "ProbeDigiDuplexStep6ResponseRCode",
         "ProbeDigiDuplexStep7ResponseRCode",
+        "ProbeDigiDuplexStep8ResponseRCode",
     };
     const char * dataNames[kDigi00xDuplexStepCount] = {
         "ProbeDigiDuplexStep0ResponseData",
@@ -6991,6 +7008,7 @@ AddDigiDuplexDiagnostics(OSDictionary * properties,
         "ProbeDigiDuplexStep5ResponseData",
         "ProbeDigiDuplexStep6ResponseData",
         "ProbeDigiDuplexStep7ResponseData",
+        "ProbeDigiDuplexStep8ResponseData",
     };
     for (size_t i = 0; i < kDigi00xDuplexStepCount; ++i) {
         AddNumberProperty(properties, opNames[i], diagnostics->stepOp[i], 32);
@@ -7806,6 +7824,10 @@ BuildIsoTransmitHeader1(uint32_t dataLength)
 uint32_t
 Digi00xDuplexDataBlocksForPacket(uint32_t packetIndex)
 {
+    if (kDigi00xDuplexActiveSampleRate == kDigi00xDuplexSampleRate48000) {
+        return 6u;
+    }
+
     uint32_t phase = packetIndex % 80u;
     return 5u + (((phase & 1u) ^ ((phase == 0u || phase >= 40u) ? 1u : 0u)) & 1u);
 }
@@ -7980,7 +8002,7 @@ RecordDigiLiveSequenceReplayPacket(uint32_t dataBlocks, bool continuous)
     gDigiLiveSequenceReplayPeriodCount++;
     if (gDigiLiveSequenceReplayPeriodCount >= kDigiLiveSequenceReplayPeriodPackets) {
         if (gDigiLiveSequenceReplayObservedTotalDataBlocks ==
-            kDigiLiveSequenceReplayPeriodDataBlocks44100) {
+            kDigiLiveSequenceReplayPeriodDataBlocks) {
             gDigiLiveSequenceReplayReady = 1;
         } else {
             gDigiLiveSequenceReplayBadTotalCount++;
@@ -8035,7 +8057,7 @@ UpdateDigiLiveTransmitPacketDescriptor(volatile OHCIAsyncDescriptor * itDescript
     uint32_t cipHeader1 =
         0x80000000u |
         (0x10u << 24) |
-        (kDigi00xDuplexCIPSFC44100 << 16) |
+        (kDigi00xDuplexActiveCIPSFC << 16) |
         0xffffu;
 
     volatile uint32_t * immediateHeader = reinterpret_cast<volatile uint32_t *>(&packetDescriptor[1]);
@@ -8848,7 +8870,7 @@ RefreshDigiLiveMovingSequenceReplay()
 
         if (cadenceSource == 0 &&
             kDigiLiveSequenceReplayMovingLearnCadenceFromQueue != 0 &&
-            rawTotalDataBlocks == kDigiLiveSequenceReplayPeriodDataBlocks44100) {
+            rawTotalDataBlocks == kDigiLiveSequenceReplayPeriodDataBlocks) {
             uint32_t queuePhase = 0xffffffff;
             uint32_t queueMismatchCount = 0xffffffff;
             if (FindDigiLiveMovingReplayQueueBestPhase(kDigiLiveSequenceReplayMovingUpdatePackets,
@@ -8898,11 +8920,11 @@ RefreshDigiLiveMovingSequenceReplay()
             gDigiLiveSequenceReplayMovingLastSyncRet = ReturnCodeToProperty(kIOReturnBadArgument);
             return kIOReturnBadArgument;
         }
-        totalDataBlocks = kDigiLiveSequenceReplayPeriodDataBlocks44100;
+        totalDataBlocks = kDigiLiveSequenceReplayPeriodDataBlocks;
     }
     gDigiLiveSequenceReplayMovingLastTotalDataBlocks = totalDataBlocks;
     if (!useCadencePhase &&
-        totalDataBlocks != kDigiLiveSequenceReplayPeriodDataBlocks44100) {
+        totalDataBlocks != kDigiLiveSequenceReplayPeriodDataBlocks) {
         gDigiLiveSequenceReplayMovingBadTotalCount++;
         ClearDigiLiveMovingReplayQueue();
         gDigiLiveSequenceReplayMovingLastSyncRet = ReturnCodeToProperty(kIOReturnBadArgument);
@@ -9004,7 +9026,7 @@ RefreshDigiLiveMovingSequenceReplay()
         dataBlockCounter = (dataBlockCounter + dataBlocks) & 0xffu;
     }
     gDigiLiveSequenceReplayMovingLastTotalDataBlocks = calculatedTotalDataBlocks;
-    if (calculatedTotalDataBlocks != kDigiLiveSequenceReplayPeriodDataBlocks44100) {
+    if (calculatedTotalDataBlocks != kDigiLiveSequenceReplayPeriodDataBlocks) {
         gDigiLiveSequenceReplayMovingBadTotalCount++;
         ClearDigiLiveMovingReplayQueue();
         gDigiLiveSequenceReplayMovingLastSyncRet = ReturnCodeToProperty(kIOReturnBadArgument);
@@ -9097,7 +9119,7 @@ RunDigiDuplexIsoProbe(IOPCIDevice * pciDevice, uint8_t memoryIndex, DigiDuplexDi
         uint32_t cipHeader1 =
             0x80000000u |
             (0x10u << 24) |
-            (kDigi00xDuplexCIPSFC44100 << 16) |
+            (kDigi00xDuplexActiveCIPSFC << 16) |
             0xffffu;
 
         packetDescriptor[0].reqCount = 8;
@@ -9860,7 +9882,7 @@ RunDigiDuplexProbe(IOPCIDevice * pciDevice,
                                 kDigi00xStateSequenceStepCount +
                                 20u) * kAsyncReadAttemptCount)) & 0x3fu;
 
-    bool channelsWritten =
+    bool rateWritten =
         RunDigiDuplexTransaction(pciDevice,
                                  memoryIndex,
                                  asyncDiagnostics,
@@ -9869,10 +9891,12 @@ RunDigiDuplexProbe(IOPCIDevice * pciDevice,
                                  txHeader,
                                  0,
                                  kDigiDuplexOpWrite,
-                                 kDigi00xOffsetIsocChannels,
-                                 duplexDiagnostics->sessionChannelsBusValue,
+                                 kDigi00xOffsetLocalRate,
+                                 kDigi00xDuplexActiveLocalRateIndex,
                                  tlabelBase);
-    bool stateRead =
+    IOSleep(20);
+
+    bool channelsWritten =
         RunDigiDuplexTransaction(pciDevice,
                                  memoryIndex,
                                  asyncDiagnostics,
@@ -9880,12 +9904,24 @@ RunDigiDuplexProbe(IOPCIDevice * pciDevice,
                                  txDescriptor,
                                  txHeader,
                                  1,
+                                 kDigiDuplexOpWrite,
+                                 kDigi00xOffsetIsocChannels,
+                                 duplexDiagnostics->sessionChannelsBusValue,
+                                 tlabelBase + kAsyncReadAttemptCount);
+    bool stateRead =
+        RunDigiDuplexTransaction(pciDevice,
+                                 memoryIndex,
+                                 asyncDiagnostics,
+                                 duplexDiagnostics,
+                                 txDescriptor,
+                                 txHeader,
+                                 2,
                                  kDigiDuplexOpRead,
                                  kDigi00xOffsetStreamingState,
                                  0,
-                                 tlabelBase + kAsyncReadAttemptCount);
+                                 tlabelBase + (2u * kAsyncReadAttemptCount));
     if (stateRead) {
-        duplexDiagnostics->initialStreamingStateBusValue = duplexDiagnostics->stepBusValue[1];
+        duplexDiagnostics->initialStreamingStateBusValue = duplexDiagnostics->stepBusValue[2];
     }
 
     uint32_t currentState = stateRead ? duplexDiagnostics->initialStreamingStateBusValue : 0;
@@ -9906,11 +9942,11 @@ RunDigiDuplexProbe(IOPCIDevice * pciDevice,
                                  duplexDiagnostics,
                                  txDescriptor,
                                  txHeader,
-                                 2,
+                                 3,
                                  kDigiDuplexOpWrite,
                                  kDigi00xOffsetStreamingSet,
                                  duplexDiagnostics->beginSetFirstBusValue,
-                                 tlabelBase + (2u * kAsyncReadAttemptCount));
+                                 tlabelBase + (3u * kAsyncReadAttemptCount));
     IOSleep(20);
 
     bool secondSet = true;
@@ -9923,11 +9959,11 @@ RunDigiDuplexProbe(IOPCIDevice * pciDevice,
                                      duplexDiagnostics,
                                      txDescriptor,
                                      txHeader,
-                                     3,
+                                     4,
                                      kDigiDuplexOpWrite,
                                      kDigi00xOffsetStreamingSet,
                                      duplexDiagnostics->beginSetSecondBusValue,
-                                     tlabelBase + (3u * kAsyncReadAttemptCount));
+                                     tlabelBase + (4u * kAsyncReadAttemptCount));
         IOSleep(20);
     } else {
         duplexDiagnostics->beginSetSecondBusValue = 0;
@@ -9938,14 +9974,14 @@ RunDigiDuplexProbe(IOPCIDevice * pciDevice,
                                      duplexDiagnostics,
                                      txDescriptor,
                                      txHeader,
-                                     3,
+                                     4,
                                      kDigiDuplexOpSkip,
                                      kDigi00xOffsetStreamingSet,
                                      0,
-                                     tlabelBase + (3u * kAsyncReadAttemptCount));
+                                     tlabelBase + (4u * kAsyncReadAttemptCount));
     }
 
-    if (channelsWritten && stateRead && firstSet && secondSet) {
+    if (rateWritten && channelsWritten && stateRead && firstSet && secondSet) {
         RunDigiDuplexIsoProbe(pciDevice, memoryIndex, duplexDiagnostics);
     }
 
@@ -9957,11 +9993,11 @@ RunDigiDuplexProbe(IOPCIDevice * pciDevice,
                                  duplexDiagnostics,
                                  txDescriptor,
                                  txHeader,
-                                 4,
+                                 5,
                                  kDigiDuplexOpWrite,
                                  kDigi00xOffsetStreamingSet,
                                  3,
-                                 tlabelBase + (4u * kAsyncReadAttemptCount));
+                                 tlabelBase + (5u * kAsyncReadAttemptCount));
     bool finishChannels =
         RunDigiDuplexTransaction(pciDevice,
                                  memoryIndex,
@@ -9969,11 +10005,11 @@ RunDigiDuplexProbe(IOPCIDevice * pciDevice,
                                  duplexDiagnostics,
                                  txDescriptor,
                                  txHeader,
-                                 5,
+                                 6,
                                  kDigiDuplexOpWrite,
                                  kDigi00xOffsetIsocChannels,
                                  0,
-                                 tlabelBase + (5u * kAsyncReadAttemptCount));
+                                 tlabelBase + (6u * kAsyncReadAttemptCount));
     IOSleep(50);
     bool finalState =
         RunDigiDuplexTransaction(pciDevice,
@@ -9982,11 +10018,11 @@ RunDigiDuplexProbe(IOPCIDevice * pciDevice,
                                  duplexDiagnostics,
                                  txDescriptor,
                                  txHeader,
-                                 6,
+                                 7,
                                  kDigiDuplexOpRead,
                                  kDigi00xOffsetStreamingState,
                                  0,
-                                 tlabelBase + (6u * kAsyncReadAttemptCount));
+                                 tlabelBase + (7u * kAsyncReadAttemptCount));
     bool finalChannels =
         RunDigiDuplexTransaction(pciDevice,
                                  memoryIndex,
@@ -9994,20 +10030,20 @@ RunDigiDuplexProbe(IOPCIDevice * pciDevice,
                                  duplexDiagnostics,
                                  txDescriptor,
                                  txHeader,
-                                 7,
+                                 8,
                                  kDigiDuplexOpRead,
                                  kDigi00xOffsetIsocChannels,
                                  0,
-                                 tlabelBase + (7u * kAsyncReadAttemptCount));
+                                 tlabelBase + (8u * kAsyncReadAttemptCount));
     if (finalState) {
-        duplexDiagnostics->finalStreamingStateBusValue = duplexDiagnostics->stepBusValue[6];
+        duplexDiagnostics->finalStreamingStateBusValue = duplexDiagnostics->stepBusValue[7];
     }
     if (finalChannels) {
-        duplexDiagnostics->finalIsocChannelsBusValue = duplexDiagnostics->stepBusValue[7];
+        duplexDiagnostics->finalIsocChannelsBusValue = duplexDiagnostics->stepBusValue[8];
     }
 
     duplexDiagnostics->success =
-        (channelsWritten && stateRead && firstSet && secondSet &&
+        (rateWritten && channelsWritten && stateRead && firstSet && secondSet &&
          finishSet && finishChannels && finalState && finalChannels) ? 1 : 0;
 }
 
@@ -10136,7 +10172,7 @@ RunDigiLiveBeginTransactions()
     uint32_t tlabelBase = DigiLiveTLabelBase();
 
     gDigiLiveBeginTransactionStage = 1;
-    bool channelsWritten =
+    bool rateWritten =
         RunDigiDuplexTransaction(gPCIDevice,
                                  gPCIMemoryIndex,
                                  &asyncDiagnostics,
@@ -10145,9 +10181,26 @@ RunDigiLiveBeginTransactions()
                                  txHeader,
                                  0,
                                  kDigiDuplexOpWrite,
+                                 kDigi00xOffsetLocalRate,
+                                 kDigi00xDuplexActiveLocalRateIndex,
+                                 tlabelBase,
+                                 kDigiLiveAsyncAttemptCount,
+                                 kDigiLiveAsyncWaitLoopsPerAttempt,
+                                 kDigiLiveAsyncRetrySettleMilliseconds);
+    IOSleep(20);
+
+    bool channelsWritten =
+        RunDigiDuplexTransaction(gPCIDevice,
+                                 gPCIMemoryIndex,
+                                 &asyncDiagnostics,
+                                 &duplexDiagnostics,
+                                 txDescriptor,
+                                 txHeader,
+                                 1,
+                                 kDigiDuplexOpWrite,
                                  kDigi00xOffsetIsocChannels,
                                  duplexDiagnostics.sessionChannelsBusValue,
-                                 tlabelBase,
+                                 tlabelBase + kAsyncReadAttemptCount,
                                  kDigiLiveAsyncAttemptCount,
                                  kDigiLiveAsyncWaitLoopsPerAttempt,
                                  kDigiLiveAsyncRetrySettleMilliseconds);
@@ -10159,16 +10212,16 @@ RunDigiLiveBeginTransactions()
                                  &duplexDiagnostics,
                                  txDescriptor,
                                  txHeader,
-                                 1,
+                                 2,
                                  kDigiDuplexOpRead,
                                  kDigi00xOffsetStreamingState,
                                  0,
-                                 tlabelBase + kAsyncReadAttemptCount,
+                                 tlabelBase + (2u * kAsyncReadAttemptCount),
                                  kDigiLiveAsyncAttemptCount,
                                  kDigiLiveAsyncWaitLoopsPerAttempt,
                                  kDigiLiveAsyncRetrySettleMilliseconds);
     if (stateRead) {
-        duplexDiagnostics.initialStreamingStateBusValue = duplexDiagnostics.stepBusValue[1];
+        duplexDiagnostics.initialStreamingStateBusValue = duplexDiagnostics.stepBusValue[2];
     }
 
     gDigiLiveBeginTransactionStage = 3;
@@ -10190,11 +10243,11 @@ RunDigiLiveBeginTransactions()
                                  &duplexDiagnostics,
                                  txDescriptor,
                                  txHeader,
-                                 2,
+                                 3,
                                  kDigiDuplexOpWrite,
                                  kDigi00xOffsetStreamingSet,
                                  duplexDiagnostics.beginSetFirstBusValue,
-                                 tlabelBase + (2u * kAsyncReadAttemptCount),
+                                 tlabelBase + (3u * kAsyncReadAttemptCount),
                                  kDigiLiveAsyncAttemptCount,
                                  kDigiLiveAsyncWaitLoopsPerAttempt,
                                  kDigiLiveAsyncRetrySettleMilliseconds);
@@ -10211,11 +10264,11 @@ RunDigiLiveBeginTransactions()
                                      &duplexDiagnostics,
                                      txDescriptor,
                                      txHeader,
-                                     3,
+                                     4,
                                      kDigiDuplexOpWrite,
                                      kDigi00xOffsetStreamingSet,
                                      duplexDiagnostics.beginSetSecondBusValue,
-                                     tlabelBase + (3u * kAsyncReadAttemptCount),
+                                     tlabelBase + (4u * kAsyncReadAttemptCount),
                                      kDigiLiveAsyncAttemptCount,
                                      kDigiLiveAsyncWaitLoopsPerAttempt,
                                      kDigiLiveAsyncRetrySettleMilliseconds);
@@ -10229,11 +10282,11 @@ RunDigiLiveBeginTransactions()
                                      &duplexDiagnostics,
                                      txDescriptor,
                                      txHeader,
-                                     3,
+                                     4,
                                      kDigiDuplexOpSkip,
                                      kDigi00xOffsetStreamingSet,
                                      0,
-                                     tlabelBase + (3u * kAsyncReadAttemptCount),
+                                     tlabelBase + (4u * kAsyncReadAttemptCount),
                                      kDigiLiveAsyncAttemptCount,
                                      kDigiLiveAsyncWaitLoopsPerAttempt,
                                      kDigiLiveAsyncRetrySettleMilliseconds);
@@ -10241,7 +10294,7 @@ RunDigiLiveBeginTransactions()
 
     CompleteDigiAsyncTransactionBuffers(gPCIDevice, gPCIMemoryIndex, &asyncDiagnostics);
     gDigiLiveBeginTransactionStage = 5;
-    kern_return_t ret = (channelsWritten && stateRead && firstSet && secondSet) ?
+    kern_return_t ret = (rateWritten && channelsWritten && stateRead && firstSet && secondSet) ?
         kIOReturnSuccess :
         kIOReturnIOError;
     gDigiLiveBeginTransactionRet = ReturnCodeToProperty(ret);
@@ -10372,7 +10425,7 @@ ConfigureDigiLiveTransmitDescriptors(volatile OHCIAsyncDescriptor * itDescriptor
         uint32_t cipHeader1 =
             0x80000000u |
             (0x10u << 24) |
-            (kDigi00xDuplexCIPSFC44100 << 16) |
+            (kDigi00xDuplexActiveCIPSFC << 16) |
             0xffffu;
 
         packetDescriptor[0].reqCount = 8;

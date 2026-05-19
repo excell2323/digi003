@@ -5,6 +5,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+static const double kDigiSampleRate = 48000.0;
+
 typedef struct RecorderState {
     FILE *file;
     AudioQueueRef queue;
@@ -33,8 +35,8 @@ static void write_wav_header(FILE *file, UInt32 dataBytes) {
     write_le32(file, 16);
     write_le16(file, 1);
     write_le16(file, 8);
-    write_le32(file, 44100);
-    write_le32(file, 44100 * 8 * 4);
+    write_le32(file, (UInt32)kDigiSampleRate);
+    write_le32(file, (UInt32)kDigiSampleRate * 8 * 4);
     write_le16(file, 8 * 4);
     write_le16(file, 32);
     fwrite("data", 1, 4, file);
@@ -156,7 +158,7 @@ int main(int argc, char **argv) {
         seconds = 0.5;
     }
     RecorderState state = {};
-    state.maxBytes = (UInt32)(44100.0 * seconds) * 8 * 4;
+    state.maxBytes = (UInt32)(kDigiSampleRate * seconds) * 8 * 4;
     state.file = fopen(path, "wb+");
     if (state.file == NULL) {
         perror(path);
@@ -172,7 +174,7 @@ int main(int argc, char **argv) {
     }
 
     AudioStreamBasicDescription asbd = {};
-    asbd.mSampleRate = 44100.0;
+    asbd.mSampleRate = kDigiSampleRate;
     asbd.mFormatID = kAudioFormatLinearPCM;
     asbd.mFormatFlags = kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked;
     asbd.mBytesPerPacket = 8 * 4;

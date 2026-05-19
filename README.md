@@ -139,6 +139,12 @@ FEEDBACK_TO_DRIVER=1 ./scripts/start-midi-bridge.sh
 With feedback enabled, the bridge forwards standard 3-byte MIDI messages for
 LED and fader state plus raw SysEx byte packets for Digi 003 display updates.
 
+## Sample Rate
+
+The current development build is pinned to a true 48 kHz hardware mode. The
+driver writes Digi 003 local-rate index `1`, advertises only 48 kHz to CoreAudio,
+and sends AM824 CIP packets with SFC `2`.
+
 ## Next Milestones
 
 1. Stabilize live RX harvest so DBC/cycle lost counts approach zero.
