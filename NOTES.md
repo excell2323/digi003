@@ -1650,6 +1650,29 @@ Validation:
 `Tools/play-digi-output` now applies a short fade-out and optional silent tail
 to avoid a hard click when the test tone stops.
 
+## 0.2.186 48 kHz Output Host Buffer Read Test
+
+At true 48 kHz, loopback capture on channel 1 showed audible jitter with no
+FireWire output underruns, no output overruns, and no payload push contention.
+The captured signal had hard discontinuities every `128` frames and many exact
+consecutive `128`-frame repeats. That points to stale host-buffer reads rather
+than device clock instability.
+
+`0.2.186` keeps the 48 kHz transport and the callback-only output push from
+`0.2.185`, but changes the `WriteEnd` copy path to read the just-written block
+from the beginning of the AudioDriverKit output buffer (`OffsetMode=0`) for the
+48 kHz test.
+
+## 0.2.187 Pro Tools 48 kHz IO Period Test
+
+CoreAudio HAL reported the device as `BufferFrameSize=48` with
+`BufferFrameSizeRange=15..48`, which explains why Pro Tools only offered a
+`32` sample H/W buffer and hit AAE `-6101`. This build changes the
+AudioDriverKit zero-timestamp period and host output buffer from `128` to `512`
+frames, matching ASFireWire's AudioDriverKit period strategy. The output copy
+path returns to `sampleTime % bufferFrames` so 256/512-frame host callbacks can
+address the proper half/period of the shared buffer.
+
 ## 0.2.141 Output Payload Path
 
 `0.2.141` adds the first non-silent output path without changing the live

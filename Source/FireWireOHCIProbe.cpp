@@ -375,11 +375,11 @@ constexpr size_t kDigi00xDuplexIRCapturePCMFrameLimit = 8192;
 constexpr size_t kDigi00xDuplexIRCapturePCMChannelCount = 8;
 constexpr uint32_t kDigi00xDuplexIRCaptureSampleRate = kDigi00xDuplexActiveSampleRate;
 constexpr uint32_t kDigi00xDuplexAM824AudioLabel = 0x40;
-constexpr uint32_t kAudioDeviceZeroTimestampPeriod = 128;
+constexpr uint32_t kAudioDeviceZeroTimestampPeriod = 512;
 constexpr uint32_t kAudioInputBufferFrameCount = 8192;
 constexpr uint32_t kAudioRingBufferFrameCount = 65536;
 constexpr uint32_t kAudioOutputStreamEnabled = 1;
-constexpr uint32_t kAudioOutputBufferFrameCount = 128;
+constexpr uint32_t kAudioOutputBufferFrameCount = 512;
 constexpr uint32_t kAudioOutputRingBufferFrameCount = 65536;
 constexpr uint32_t kAudioOutputChannelCount = 8;
 constexpr uint32_t kAudioOutputBufferOffsetMode = 1;
@@ -423,7 +423,7 @@ constexpr uint32_t kDigiLiveSequenceReplayPeriodDataBlocks =
     kDigi00xDuplexActiveSampleRate / 100u;
 constexpr uint32_t kDigiLiveOutputPayloadUpdateEnabled = 1;
 constexpr uint32_t kDigiLiveOutputLeadPackets = 1024;
-constexpr uint32_t kDigiLiveOutputServiceAheadPackets = 64;
+constexpr uint32_t kDigiLiveOutputServiceAheadPackets = 128;
 constexpr uint32_t kDigiLiveOutputSilenceAheadPackets = 1024;
 constexpr uint32_t kDigiLiveOutputMaxPacketsPerPush = 512;
 constexpr uint32_t kDigiLiveOutputStopSilencePushCount = 2;
@@ -1570,6 +1570,7 @@ uint32_t gDigiLiveOutputPushInProgress = 0;
 uint64_t gDigiLiveOutputPushBusyCount = 0;
 uint64_t gDigiLiveOutputPushAttemptCount = 0;
 uint64_t gDigiLiveOutputPushSuccessCount = 0;
+uint64_t gDigiLiveOutputWorkerPushSkippedAudioCount = 0;
 uint64_t gDigiLiveOutputPacketWriteCount = 0;
 uint64_t gDigiLiveOutputFrameWriteCount = 0;
 uint64_t gDigiLiveOutputSilentFrameWriteCount = 0;
@@ -4294,6 +4295,10 @@ PublishAudioRuntimeDiagnostics()
     AddNumberProperty(properties, "ProbeDigiLiveOutputPushBusyCount", gDigiLiveOutputPushBusyCount, 64);
     AddNumberProperty(properties, "ProbeDigiLiveOutputPushAttemptCount", gDigiLiveOutputPushAttemptCount, 64);
     AddNumberProperty(properties, "ProbeDigiLiveOutputPushSuccessCount", gDigiLiveOutputPushSuccessCount, 64);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveOutputWorkerPushSkippedAudioCount",
+                      gDigiLiveOutputWorkerPushSkippedAudioCount,
+                      64);
     AddNumberProperty(properties, "ProbeDigiLiveOutputPacketWriteCount", gDigiLiveOutputPacketWriteCount, 64);
     AddNumberProperty(properties, "ProbeDigiLiveOutputFrameWriteCount", gDigiLiveOutputFrameWriteCount, 64);
     AddNumberProperty(properties,
@@ -8184,6 +8189,7 @@ ResetDigiLiveOutputState()
     gDigiLiveOutputPushBusyCount = 0;
     gDigiLiveOutputPushAttemptCount = 0;
     gDigiLiveOutputPushSuccessCount = 0;
+    gDigiLiveOutputWorkerPushSkippedAudioCount = 0;
     gDigiLiveOutputPacketWriteCount = 0;
     gDigiLiveOutputFrameWriteCount = 0;
     gDigiLiveOutputSilentFrameWriteCount = 0;
@@ -12310,7 +12316,11 @@ StartAudioRefreshWorker()
             gAudioRefreshWorkerLastGeneration = gAudioCaptureGeneration;
 
             if (gDigiLiveRunning != 0) {
-                (void)PushAudioOutputToDigiLiveTransmit();
+                if (AudioOutputRingFillFrames() == 0) {
+                    (void)PushAudioOutputToDigiLiveTransmit();
+                } else {
+                    gDigiLiveOutputWorkerPushSkippedAudioCount++;
+                }
                 if ((gAudioRefreshWorkerIterationCount % kDigiLiveWorkerPublishInterval) == 0) {
                     gAudioRefreshWorkerLivePublishCount++;
                     PublishAudioRuntimeDiagnostics();
@@ -13182,6 +13192,10 @@ IMPL(FireWireOHCIProbe, Start)
         AddNumberProperty(diagnostics, "ProbeAudioOutputRingKeepFrames", kAudioOutputRingKeepFrames, 32);
         AddNumberProperty(diagnostics, "ProbeDigiLiveOutputServiceAheadPackets", kDigiLiveOutputServiceAheadPackets, 32);
         AddNumberProperty(diagnostics, "ProbeDigiLiveOutputSilenceAheadPackets", kDigiLiveOutputSilenceAheadPackets, 32);
+        AddNumberProperty(diagnostics,
+                          "ProbeDigiLiveOutputWorkerPushSkippedAudioCount",
+                          gDigiLiveOutputWorkerPushSkippedAudioCount,
+                          64);
         AddNumberProperty(diagnostics, "ProbeAudioCaptureFrameCount", gAudioCaptureFrameCount, 32);
         AddNumberProperty(diagnostics, "ProbeAudioCapturePeakAbs", gAudioCapturePeakAbs, 32);
         AddNumberProperty(diagnostics, "ProbeAudioInputCallbackCount", gAudioInputCallbackCount, 32);
