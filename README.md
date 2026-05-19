@@ -1,111 +1,159 @@
 # FireWireOHCIProbe
 
-Experimental macOS DriverKit/AudioDriverKit driver work for the Digidesign/Avid Digi 003 on Apple Silicon through a Thunderbolt-to-FireWire OHCI controller.
+Experimental macOS DriverKit/AudioDriverKit driver work for the Digidesign/Avid
+Digi 003 on Apple Silicon through a Thunderbolt-to-FireWire OHCI controller.
 
-The project started as a minimal OHCI-1394 PCI probe. It now brings up the Lucent/Agere OHCI controller, performs async FireWire transactions with the Digi 003, starts duplex isochronous streams, and exposes an experimental Core Audio input device. Audio capture works, but the live harvest is not stable yet: DBC/OHCI-cycle diagnostics show packet continuity loss that still needs to be fixed.
+## Status
 
-## Current Target
+Current developer beta:
 
+```text
+Digi 003 FireWire Driver 0.2.194 beta 1
+Driver version: 0.2.194/394
+Known working local commit: 9e5c148
+```
+
+This is the first build that is useful as a community test milestone:
+
+- Core Audio input and output expose 8 channels.
+- 44.1 kHz and 48 kHz are selectable from Core Audio/Pro Tools.
+- The driver switches Digi 003 local-rate index, AM824 CIP SFC/FDF, and packet
+  cadence with the selected sample rate.
+- 44.1 kHz and 48 kHz have both been locally verified by ear.
+- Pro Tools can use the Digi 003 as an audio device.
+- The CoreMIDI bridge exposes the control-surface port for V-Control/Pro Tools
+  HUI workflows.
+- Motor fader, LED, and display feedback work in the local development setup.
+
+This is still a developer beta, not a ready-to-install public release. Normal
+distribution is blocked until Apple grants distribution-capable DriverKit
+entitlements and the app/driver are signed with Developer ID and notarized.
+
+## Distribution Notice
+
+Other users should not expect to install the current build by downloading a
+zip. A DriverKit system extension must be shipped inside a macOS app bundle,
+installed from `/Applications`, signed with valid Apple signing material, and
+activated through the SystemExtensions framework.
+
+The provisioning profiles are not installed separately by the user. They must be
+embedded into the signed app and driver extension and must match the signing
+team and entitlements. A development provisioning profile is useful for local
+testing, but it does not make a public build installable on arbitrary Macs.
+
+For a public installer we still need:
+
+- Apple-approved DriverKit entitlements for distribution.
+- Developer ID signing for the host app and driver extension.
+- Matching embedded provisioning profiles for both bundles.
+- Apple notarization.
+- A package that installs the host app and MIDI bridge launch agent.
+
+See `SIGNING.md` for the current signing requirements and blockers.
+
+## Hardware Target
+
+- Device: Digidesign/Avid Digi 003
+- FireWire path: Apple Thunderbolt-to-FireWire adapter chain
 - PCI vendor: `0x11c1`
 - PCI device: `0x5901`
 - macOS provider: `IOPCIDevice`
-- Required entitlement shown by I/O Registry: `com.apple.developer.driverkit.transport.pci`
-- DriverKit SDK found locally: `DriverKit25.5.sdk`
-- Current macOS DriverKit runtime: `25.4`, so the probe is built with deployment target `25.4`.
-- The driver is built for `arm64`; macOS rejects development `arm64e` DriverKit binaries as preview ABI.
-- Local active test version: `0.2.48/248`.
+- Required transport entitlement: `com.apple.developer.driverkit.transport.pci`
+- DriverKit deployment target: `25.4`
+- Architecture: `arm64`
 
-## What This Driver Currently Does
+## Current Driver Features
 
 - Matches the `pci11c1,5901` PCI function.
 - Opens an exclusive DriverKit PCI session.
-- Reads PCI vendor/device/class/revision registers.
-- Reads BAR0 metadata.
-- Reads the OHCI version register at BAR0 offset `0x00`.
-- Enables PCI `Memory Space` and `Bus Lead` command bits before MMIO reads.
-- Publishes probe diagnostics as `Probe...` properties in IORegistry.
-- Initializes enough OHCI state for bus reset, self-ID, async transactions, and isochronous DMA experiments.
-- Reads Digi 003 config/register state through async transactions.
-- Starts Digi 003 duplex isochronous TX/RX.
-- Publishes an experimental 8-channel Core Audio input stream.
-- Tracks RX CIP/DBC/SYT and OHCI-cycle continuity diagnostics.
-- Closes the session on stop.
+- Enables the OHCI MMIO path and reads controller diagnostics.
+- Initializes enough OHCI state for bus reset, self-ID, async transactions, and
+  isochronous DMA.
+- Performs Digi 003 async register/config transactions.
+- Starts duplex isochronous transmit and receive streams.
+- Publishes an 8-channel Core Audio input stream.
+- Publishes an 8-channel Core Audio output stream.
+- Supports 44.1 kHz and 48 kHz hardware modes.
+- Tracks RX CIP/DBC/SYT, OHCI-cycle, ring-buffer, and output-push diagnostics
+  through IORegistry properties.
+- Provides a DriverKit user client for control-surface feedback from the MIDI
+  bridge in local development builds.
 
-If this cannot be signed/loaded with the PCI DriverKit entitlement, a real FireWire stack cannot be delivered as a normal third-party DriverKit driver on this machine without Apple granting that entitlement.
+## Known Limitations
+
+- This is a beta driver and may still click under heavy system load.
+- Sleep/wake and overnight stability still need more testing.
+- Lower Pro Tools hardware buffer sizes may be sensitive to CPU spikes; 64
+  samples has worked locally, and larger buffers should be tested when offered.
+- Control-surface mapping is mostly usable but not final.
+- The current local build uses broad development user-client access so the MIDI
+  bridge can feed display, LED, and motor-fader feedback into the driver.
+- A public installer cannot be produced until Apple distribution entitlements
+  and notarization are in place.
 
 ## Build
 
-First finish Xcode's first launch setup if `xcodebuild` reports missing components:
+First finish Xcode's first launch setup if needed:
 
 ```sh
 sudo xcodebuild -runFirstLaunch
 ```
 
-Then try:
+Build the driver, host app, and MIDI bridge:
 
 ```sh
-cd FireWireOHCIProbe
-./scripts/build.sh
+./scripts/build-tools.sh
+./scripts/build-host-app.sh
+```
+
+Ad-hoc signing only proves that the bundle can be sealed locally. It is not
+enough to activate this DriverKit system extension:
+
+```sh
 ./scripts/sign-adhoc.sh
 ```
 
-The build script intentionally does not install or load the driver. `sign-adhoc.sh` only proves that the bundle can be sealed locally; it is not a production or distribution signature. Loading a PCI DriverKit extension requires a host app/system extension flow and, in practice, Apple-granted signing for `com.apple.developer.driverkit.transport.pci`.
-
-See `SIGNING.md` for the current signing blocker and the required Apple Developer setup.
-
-## Host App Activation Test
-
-Build the tiny host app:
+For local development on a machine with matching Apple Development certificates
+and provisioning profiles:
 
 ```sh
-./scripts/build-host-app.sh
-./scripts/list-profiles.sh
-./scripts/embed-profiles.sh
+SIGN_IDENTITY='Apple Development: Your Name (TEAMID)' ./scripts/sign-with-identity.sh
 ./scripts/install-host-app.sh
-```
-
-The DriverKit bundle installed under `Contents/Library/SystemExtensions` must keep the full bundle identifier as its filename:
-`com.axelheckert.driver.FireWireOHCIProbe.dext`. Apple rejects system extensions whose filename does not match their bundle identifier.
-
-Run it from Terminal so the activation result is visible:
-
-```sh
 /Applications/FireWireOHCIProbeLoader.app/Contents/MacOS/FireWireOHCIProbeLoader
 ```
 
-If macOS asks for approval, approve the extension in System Settings, then check:
+If macOS asks for approval, approve the extension in System Settings, then
+check:
 
 ```sh
 systemextensionsctl list
-log show --last 10m --style compact --predicate 'eventMessage CONTAINS[c] "FireWireOHCIProbe" OR process == "sysextd"'
+ioreg -l -r -c FireWireOHCIProbe
 ```
 
-## Digi 003 Control Surface Bridge
+## CoreMIDI Bridge
 
-The experimental CoreMIDI bridge exposes the internal Digi 003 port-E control
-messages as a virtual MIDI source/destination named:
+The experimental CoreMIDI bridge exposes the internal Digi 003 control-surface
+port as:
 
 ```text
 Avid 003 Port 3 (Control)
 ```
 
-Build and start it before launching V-Control Pro:
+Start it before launching V-Control Pro and Pro Tools:
 
 ```sh
-./scripts/build-tools.sh
 ./scripts/start-midi-bridge.sh
 open -a "V-Control Pro"
 open -a "Pro Tools"
 ```
 
-Stop the background bridge with:
+Stop it with:
 
 ```sh
 ./scripts/stop-midi-bridge.sh
 ```
 
-V-Control Pro's Digi 003 setup should use `Avid 003 Port 3 (Control)` for its
-surface input/output. Pro Tools should use V-Control's own HUI ports instead:
+For the current V-Control/HUI setup:
 
 ```text
 Setup > MIDI > MIDI Input Devices:
@@ -119,61 +167,50 @@ Setup > Peripherals > MIDI Controllers:
   Ch's         8
 ```
 
-The bridge currently forwards Digi 003 button/fader/encoder messages to
-CoreMIDI. Reverse DAW feedback to LEDs, displays, and motor faders requires the
-DEXT to be signed with `com.apple.developer.driverkit.allow-any-userclient-access`
-or the bridge app/helper to be signed with `com.apple.developer.driverkit.userclient-access`.
-By default, `scripts/start-midi-bridge.sh` still starts the bridge with
-DriverKit feedback disabled while logging incoming DAW feedback to:
+See `CONTROL_SURFACE.md` for the current physical control map.
+
+## Sample Rate Test
+
+The current driver advertises exactly these nominal sample rates:
 
 ```text
-~/Library/Logs/FireWireOHCIProbe/digi003-midi-feedback.log
+44100 Hz
+48000 Hz
 ```
 
-To test DAW feedback after installing a DEXT with user-client access enabled:
-
-```sh
-FEEDBACK_TO_DRIVER=1 ./scripts/start-midi-bridge.sh
-```
-
-With feedback enabled, the bridge forwards standard 3-byte MIDI messages for
-LED and fader state plus raw SysEx byte packets for Digi 003 display updates.
-
-## Sample Rate
-
-The current development build is pinned to a true 48 kHz hardware mode. The
-driver writes Digi 003 local-rate index `1`, advertises only 48 kHz to CoreAudio,
-and sends AM824 CIP packets with SFC `2`.
-
-## Next Milestones
-
-1. Stabilize live RX harvest so DBC/cycle lost counts approach zero.
-2. Make the worker adaptive with low-water burst harvesting and larger descriptor drains.
-3. Move TX scheduling toward Linux/ASFireWire-style dynamic packet scheduling.
-4. Add MIDI/control-surface and mixer/control support.
-
-See `NOTES.md` for current measurements and working hypotheses.
-
-## Verified Local Status
-
-As of the `0.0.4/4` build, the DriverKit system extension is signed, activated, and matched:
+Expected IORegistry values:
 
 ```text
-7H3ND356AV com.axelheckert.driver.FireWireOHCIProbe (0.0.4/4) [activated enabled]
+44.1 kHz:
+  ProbeAudioRuntimeSampleRate        = 44100
+  ProbeAudioRuntimeDigiLocalRateIndex = 0
+  ProbeAudioRuntimeCIPSFC             = 1
+  ProbeDigiLiveRxFDF                  = 1
+
+48 kHz:
+  ProbeAudioRuntimeSampleRate        = 48000
+  ProbeAudioRuntimeDigiLocalRateIndex = 1
+  ProbeAudioRuntimeCIPSFC             = 2
+  ProbeDigiLiveRxFDF                  = 2
 ```
 
-The probe opens the Lucent/Agere OHCI-1394 controller and reads BAR0 after enabling the PCI command bits:
+## Test Matrix For Beta Builds
 
-```text
-ProbeVendorID              = 0x11c1
-ProbeDeviceID              = 0x5901
-ProbeClassCode             = 0x0c0010
-ProbeBAR0Raw               = 0x00100004
-ProbeBAR0Size              = 0x1000
-ProbeCommandBefore         = 0x0000
-ProbeCommandAfter          = 0x0006
-ProbeOHCIVersion           = 0x00010010
-ProbeMemoryReadSucceeded   = 1
-```
+Before calling a build good, test:
 
-The important discovery was that BAR0 reads returned `0xffffffff` until the driver explicitly enabled `kIOPCICommandMemorySpace` and `kIOPCICommandBusLead` after `IOPCIDevice::Open()`.
+- 44.1 kHz playback for at least 15 minutes.
+- 48 kHz playback for at least 15 minutes.
+- Input monitoring/recording on channel 1.
+- Output playback through Pro Tools and a local audio file.
+- Pro Tools hardware buffer sizes, especially 64 and 128 samples.
+- Fader moves from Digi 003 to Pro Tools.
+- Fader feedback from Pro Tools to Digi 003.
+- Bank/Nudge mode buttons and LEDs.
+- Display track names and volume values.
+- Sleep/wake or a full reboot followed by driver reload.
+
+## Development Notes
+
+See `NOTES.md` for historical measurements, transport experiments, and working
+hypotheses. Some older sections describe pre-audio-output builds and are kept
+as lab notes rather than current status.

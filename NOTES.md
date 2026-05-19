@@ -8,9 +8,20 @@ Current active local version:
 
 - Driver: `com.axelheckert.driver.FireWireOHCIProbe`
 - Host app: `com.axelheckert.FireWireOHCIProbeLoader`
-- Version: `0.2.159/359`
+- Version: `0.2.194/394`
 - Team ID used locally: `7H3ND356AV`
 - Controller: `pci11c1,5901` / IEEE 1394 Open HCI
+
+Current milestone:
+
+- `0.2.194/394` is the first developer-beta build with working Core Audio
+  input/output, selectable 44.1/48 kHz hardware modes, and working local
+  Pro Tools/V-Control control-surface feedback.
+- 44.1 kHz uses Digi local-rate index `0` and CIP SFC/FDF `1`.
+- 48 kHz uses Digi local-rate index `1` and CIP SFC/FDF `2`.
+- Public installation still requires Apple distribution DriverKit
+  entitlements, Developer ID signing, embedded distribution profiles, and
+  notarization.
 
 ## Important Findings
 

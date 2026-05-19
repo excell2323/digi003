@@ -21,6 +21,7 @@ Driver extension:
 
 ```xml
 com.apple.developer.driverkit
+com.apple.developer.driverkit.family.audio
 com.apple.developer.driverkit.transport.pci
 ```
 
@@ -122,3 +123,50 @@ requires a matching DEXT provisioning profile.
 Local development builds currently use `allow-any-userclient-access` on the
 DEXT so the CoreMIDI bridge can pass V-Control/Pro Tools feedback back to the
 driver while the app-scoped entitlement request is pending.
+
+## Public Distribution Requirements
+
+The current `0.2.194/394` beta is signed as a local development build. That is
+enough for the development machine that owns the certificate and provisioning
+profiles, but it is not a normal public release path.
+
+For other users to install a release without creating their own local signing
+setup, the project needs:
+
+1. A Developer ID Application certificate for the host app.
+2. Distribution-capable provisioning profiles for the host app and the DEXT.
+3. Apple-approved DriverKit distribution entitlements for the DEXT:
+
+```xml
+com.apple.developer.driverkit
+com.apple.developer.driverkit.family.audio
+com.apple.developer.driverkit.transport.pci
+```
+
+4. A user-client feedback entitlement strategy:
+
+```xml
+com.apple.developer.driverkit.userclient-access
+```
+
+preferred on the app/helper that opens the driver user client, or an
+Apple-approved distribution profile for:
+
+```xml
+com.apple.developer.driverkit.allow-any-userclient-access
+```
+
+if Apple accepts the broader development-style approach.
+
+5. Notarization of the signed app bundle or installer package.
+6. A package that installs the host app in `/Applications` and installs/loads
+   the MIDI bridge launch agent.
+
+The provisioning profiles can be embedded in the shipped app and DEXT as
+`embedded.provisionprofile`, but they are not a standalone profile that the end
+user installs by hand. The signature, bundle IDs, Team ID, and embedded profiles
+must all agree.
+
+Until that distribution signing path exists, GitHub releases should be labeled
+as developer/test builds and should not promise drag-and-drop installation for
+arbitrary Macs.
