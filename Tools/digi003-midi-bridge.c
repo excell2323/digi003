@@ -15,7 +15,7 @@ enum {
     kDebugUserClientType = 0x44494749,
     kDebugSelectorMidiMessage = 0,
     kDebugSelectorMidiBytes = 2,
-    kMaxRawMidiBytesPerCall = 14,
+    kMaxRawMidiBytesPerCall = 512,
     kDecodedRecentCapacity = 256,
 };
 
@@ -133,6 +133,17 @@ static size_t read_recent_messages(io_service_t service, uint32_t *messages, siz
     return count;
 }
 
+static bool driver_feedback_ready(void)
+{
+    if (!g_forward_feedback_to_driver || g_probe_service == IO_OBJECT_NULL) {
+        return false;
+    }
+
+    uint32_t running = 0;
+    return read_u32_property(g_probe_service, CFSTR("ProbeDigiLiveRunning"), &running) &&
+           running != 0;
+}
+
 static void send_coremidi_message(MIDIEndpointRef source, uint8_t status, uint8_t data1, uint8_t data2)
 {
     Byte buffer[64];
@@ -192,11 +203,8 @@ static void print_midi_bytes(FILE *stream, const char *prefix, const uint8_t *by
 
 static kern_return_t ensure_debug_connection(void)
 {
-    if (!g_forward_feedback_to_driver) {
-        return kIOReturnOffline;
-    }
-    if (g_probe_service == IO_OBJECT_NULL) {
-        return kIOReturnNotFound;
+    if (!driver_feedback_ready()) {
+        return kIOReturnNotReady;
     }
     if (g_debug_connect != IO_OBJECT_NULL) {
         return KERN_SUCCESS;
@@ -243,16 +251,17 @@ static kern_return_t send_debug_midi_bytes(uint32_t port, const uint8_t *bytes, 
             return ret;
         }
 
-        uint64_t scalar_input[2 + kMaxRawMidiBytesPerCall] = {port, chunk};
-        for (UInt16 i = 0; i < chunk; ++i) {
-            scalar_input[2 + i] = bytes[offset + i];
-        }
-        ret = IOConnectCallScalarMethod(g_debug_connect,
-                                        kDebugSelectorMidiBytes,
-                                        scalar_input,
-                                        2 + chunk,
-                                        NULL,
-                                        NULL);
+        uint64_t scalar_input[1] = {port};
+        ret = IOConnectCallMethod(g_debug_connect,
+                                  kDebugSelectorMidiBytes,
+                                  scalar_input,
+                                  1,
+                                  bytes + offset,
+                                  chunk,
+                                  NULL,
+                                  NULL,
+                                  NULL,
+                                  NULL);
         if (ret != KERN_SUCCESS) {
             close_debug_connection();
             return ret;
@@ -299,7 +308,9 @@ static void midi_read_proc(const MIDIPacketList *packet_list, void *read_proc_re
                        g_forward_feedback_to_driver ? "" : " (disabled)");
                 fflush(stdout);
             }
-            if (ret != KERN_SUCCESS && g_forward_feedback_to_driver) {
+            if (ret != KERN_SUCCESS &&
+                ret != kIOReturnNotReady &&
+                g_forward_feedback_to_driver) {
                 fprintf(stderr,
                         "bridge: failed to send MIDI sysex feedback to driver: 0x%08x (%s)\n",
                         ret,
@@ -355,7 +366,9 @@ static void midi_read_proc(const MIDIPacketList *packet_list, void *read_proc_re
                        g_forward_feedback_to_driver ? "" : " (disabled)");
                 fflush(stdout);
             }
-            if (ret != KERN_SUCCESS && g_forward_feedback_to_driver) {
+            if (ret != KERN_SUCCESS &&
+                ret != kIOReturnNotReady &&
+                g_forward_feedback_to_driver) {
                 fprintf(stderr,
                         "bridge: failed to send MIDI feedback to driver: 0x%08x (%s)\n",
                         ret,
@@ -456,6 +469,11 @@ int main(int argc, char **argv)
     uint32_t recent_index = 0;
     uint32_t recent_count = 0;
     uint32_t messages[kDecodedRecentCapacity] = {0};
+    uint32_t missed_polls = 0;
+    uint32_t max_missed_polls = 5000u / poll_ms;
+    if (max_missed_polls < 10u) {
+        max_missed_polls = 10u;
+    }
 
     if (read_u64_property(g_probe_service, CFSTR("ProbeControlDecodedMessageCount"), &decoded_count)) {
         last_count = include_existing ? 0 : decoded_count;
@@ -470,9 +488,15 @@ int main(int argc, char **argv)
         if (!read_u64_property(g_probe_service, CFSTR("ProbeControlDecodedMessageCount"), &decoded_count) ||
             !read_u32_property(g_probe_service, CFSTR("ProbeControlDecodedRecentIndex"), &recent_index) ||
             !read_u32_property(g_probe_service, CFSTR("ProbeControlDecodedRecentCount"), &recent_count)) {
+            missed_polls++;
+            if (missed_polls >= max_missed_polls) {
+                fprintf(stderr, "bridge: FireWireOHCIProbe service stopped responding; exiting for restart\n");
+                break;
+            }
             usleep(poll_ms * 1000u);
             continue;
         }
+        missed_polls = 0;
 
         if (decoded_count < last_count) {
             last_count = decoded_count;

@@ -1673,6 +1673,31 @@ frames, matching ASFireWire's AudioDriverKit period strategy. The output copy
 path returns to `sampleTime % bufferFrames` so 256/512-frame host callbacks can
 address the proper half/period of the shared buffer.
 
+Pro Tools then offered `32`, `64`, and `128` sample H/W buffers. User listening
+confirmed that `64` samples sounds good at 48 kHz. Runtime diagnostics during
+Pro Tools playback showed `ProbeAudioRuntimeOutputLastBufferFrameSize=64`,
+`ProbeDigiLiveOutputPushBusyCount=0`, and no output underruns/overruns.
+
+## 0.2.188 Output Latency Step 1
+
+This build keeps the stable 48 kHz Pro Tools period strategy from `0.2.187`,
+but reduces the most conservative output buffering:
+
+- `ProbeDigiLiveOutputLeadPackets`: `1024` -> `512`
+- `ProbeDigiLiveOutputSilenceAheadPackets`: `1024` -> `512`
+- `ProbeAudioRuntimeOutputRingPrebufferFrames`: `1024` -> `512`
+
+The goal is to reduce perceived playback latency while keeping enough FireWire
+IT lead for the OHCI payload update path.
+
+The MIDI bridge launch agent now runs a small watcher script instead of the
+bridge binary directly. The watcher waits for `FireWireOHCIProbe`, restarts the
+bridge after a DEXT reload, keeps driver feedback enabled by default, and can
+optionally wait for V-Control with `WAIT_FOR_VCONTROL=1 ./scripts/start-midi-bridge.sh`.
+The bridge exits for launchd restart if the DEXT disappears and only forwards
+CoreMIDI feedback to the driver while `ProbeDigiLiveRunning=1`, preventing
+pre-stream HUI/SysEx feedback from filling the driver feedback queue.
+
 ## 0.2.141 Output Payload Path
 
 `0.2.141` adds the first non-silent output path without changing the live
