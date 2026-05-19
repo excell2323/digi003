@@ -180,7 +180,9 @@ messages and any DAW-specific display/LED response protocol.
 ## Next Probe Order
 
 1. Load the `0.2.181` mapping build and confirm 0D/0E/0F buttons no longer increase `ProbeControlStateUnknownMessageCount`.
-2. Probe LED feedback safely by block, avoiding A/B MIDI MAP as generic LED targets.
-3. Add a CoreMIDI-facing endpoint for port-`0` MIDI-mode messages.
-4. Add a HID/modifier bridge for SHIFT, OPT/ALT, CTRL/WIN, and COMMAND/CTRL if Pro Tools does not handle them through its own connector.
-5. Probe display/DAW feedback once the Pro Tools control protocol layer exists.
+2. Use `Tools/digi003-midi-bridge.c` to forward port-`E` surface messages into
+   the V-Control/Pro Tools HUI layer.
+3. Probe LED feedback safely by block, avoiding A/B MIDI MAP as generic LED targets.
+4. Add a CoreMIDI-facing endpoint for port-`0` MIDI-mode messages.
+5. Add a HID/modifier bridge for SHIFT, OPT/ALT, CTRL/WIN, and COMMAND/CTRL if Pro Tools does not handle them through its own connector.
+6. Probe display/DAW feedback once the Pro Tools control protocol layer exists.

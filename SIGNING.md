@@ -82,3 +82,39 @@ SIGN_IDENTITY='Apple Development: Your Name (TEAMID)' ./scripts/sign-with-identi
 ```
 
 If activation gets stuck on an old version during replacement, unplug and replug the Thunderbolt-to-FireWire adapter so IOKit drops the old `IOPCIDevice` match and starts the new DEXT instance.
+
+## Control Feedback UserClient Access
+
+The CoreMIDI control bridge can receive feedback from V-Control/Pro Tools, but
+an unsigned command-line bridge cannot open the DriverKit debug user client:
+
+```text
+IOServiceOpen(...) -> 0xe00002e2 / kIOReturnNotPermitted
+```
+
+For motor fader, LED, and display feedback, the process that opens the driver
+must be signed with a provisioning profile that includes:
+
+```xml
+com.apple.developer.driverkit.userclient-access
+```
+
+The value should list the DEXT bundle ID:
+
+```xml
+<key>com.apple.developer.driverkit.userclient-access</key>
+<array>
+    <string>com.axelheckert.driver.FireWireOHCIProbe</string>
+</array>
+```
+
+This belongs on the client app/helper that opens the `IOUserClient`, most
+likely `com.axelheckert.FireWireOHCIProbeLoader` or a dedicated MIDI bridge
+helper inside that app bundle. Adding the key locally is not sufficient; the
+Apple provisioning profile must contain it too.
+
+Development alternative: the DEXT can be granted
+`com.apple.developer.driverkit.allow-any-userclient-access`, which lets any
+app connect to the driver user client. That is useful for quick local testing,
+but it is broader than the app-scoped `userclient-access` path and also
+requires a matching DEXT provisioning profile.

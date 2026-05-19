@@ -80,6 +80,50 @@ systemextensionsctl list
 log show --last 10m --style compact --predicate 'eventMessage CONTAINS[c] "FireWireOHCIProbe" OR process == "sysextd"'
 ```
 
+## Digi 003 Control Surface Bridge
+
+The experimental CoreMIDI bridge exposes the internal Digi 003 port-E control
+messages as a virtual MIDI source/destination named:
+
+```text
+Avid 003 Port 3 (Control)
+```
+
+Build and start it before launching V-Control Pro:
+
+```sh
+./scripts/build-tools.sh
+./scripts/start-midi-bridge.sh
+open -a "V-Control Pro"
+open -a "Pro Tools"
+```
+
+Stop the background bridge with:
+
+```sh
+./scripts/stop-midi-bridge.sh
+```
+
+V-Control Pro's Digi 003 setup should use `Avid 003 Port 3 (Control)` for its
+surface input/output. Pro Tools should use V-Control's own HUI ports instead:
+
+```text
+Setup > MIDI > MIDI Input Devices:
+  enable V-Control
+  leave V-Control Midi Mode disabled
+
+Setup > Peripherals > MIDI Controllers:
+  Type         HUI
+  Receive From V-Control
+  Send To      V-Control
+  Ch's         8
+```
+
+The bridge currently forwards Digi 003 button/fader/encoder messages to
+CoreMIDI. Reverse DAW feedback to LEDs, displays, and motor faders still needs
+a signed helper or driver-side feedback mailbox because unsigned command-line
+tools cannot open the DriverKit debug user client on this system.
+
 ## Next Milestones
 
 1. Stabilize live RX harvest so DBC/cycle lost counts approach zero.
