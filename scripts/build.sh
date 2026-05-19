@@ -31,6 +31,7 @@ mkdir -p "$BUILD_DIR/DerivedSources" "$BUILD_DIR/Objects" "$BUILD_DIR/$DEXT_NAME
 
 mkdir -p "$BUILD_DIR/DerivedSources/FireWireOHCIProbe"
 cp "$BUILD_DIR/DerivedSources/FireWireOHCIProbe.h" "$BUILD_DIR/DerivedSources/FireWireOHCIProbe/FireWireOHCIProbe.h"
+cp "$BUILD_DIR/DerivedSources/FireWireOHCIProbe.h" "$BUILD_DIR/DerivedSources/FireWireOHCIProbe/FireWireOHCIProbeAudioDevice.h"
 cp "$BUILD_DIR/DerivedSources/FireWireOHCIProbe.h" "$BUILD_DIR/DerivedSources/FireWireOHCIProbe/FireWireOHCIProbeDebugUserClient.h"
 
 "$CLANG"++ \

@@ -2,12 +2,20 @@
 #define FireWireOHCIProbe_h
 
 #include <Availability.h>
+#include <AudioDriverKit/IOUserAudioDevice.iig>
 #include <AudioDriverKit/IOUserAudioDriver.iig>
 #include <DriverKit/IOInterruptDispatchSource.iig>
 #include <DriverKit/IOService.iig>
 #include <DriverKit/IOUserClient.iig>
 #include <DriverKit/OSAction.iig>
 #include <PCIDriverKit/IOPCIDevice.iig>
+
+class FireWireOHCIProbeAudioDevice: public IOUserAudioDevice
+{
+public:
+    virtual kern_return_t
+    HandleChangeSampleRate(double in_sample_rate) override;
+};
 
 class FireWireOHCIProbe: public IOUserAudioDriver
 {

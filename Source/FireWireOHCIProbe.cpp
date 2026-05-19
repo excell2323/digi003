@@ -234,7 +234,7 @@ constexpr uint32_t kDigiLiveMidiRawFragmentEchoEnabled = 0;
 constexpr uint32_t kDigiLiveMidiDecodedFeedbackEnabled = 1;
 constexpr uint32_t kDigiLiveMidiEchoToOutputEnabled = 1;
 constexpr uint32_t kDigiLiveMidiEchoConsolePortOnlyEnabled = 1;
-constexpr uint32_t kDigiLiveMidiEchoQueueSize = 1024;
+constexpr uint32_t kDigiLiveMidiEchoQueueSize = 4096;
 constexpr uint32_t kDigiLiveMidiEchoFaderMoveFeedbackEnabled = 1;
 constexpr uint32_t kDigiLiveMidiEchoFaderMoveFeedbackStride = 4;
 constexpr uint32_t kDigiLiveMidiEchoFaderMoveFeedbackMinDelta = 16;
@@ -273,6 +273,9 @@ constexpr uint32_t kDigiLiveControlNoteArrowLeft = 0x05;
 constexpr uint32_t kDigiLiveControlNoteArrowRight = 0x06;
 constexpr uint32_t kDigiLiveControlNoteArrowUp = 0x07;
 constexpr uint32_t kDigiLiveControlNoteArrowDown = 0x08;
+constexpr uint32_t kDigiLiveControlNoteNavModeBank = 0x02;
+constexpr uint32_t kDigiLiveControlNoteNavModeNudge = 0x03;
+constexpr uint32_t kDigiLiveControlNoteNavModeZoom = 0x04;
 constexpr uint32_t kDigiLiveControlNoteTransportRTZ = 0x06;
 constexpr uint32_t kDigiLiveControlNoteTransportRewind = 0x07;
 constexpr uint32_t kDigiLiveControlNoteTransportFastForward = 0x08;
@@ -314,13 +317,11 @@ constexpr uint64_t kDigiLiveControlDebugSelectorMidiBytes = 2;
 constexpr uint32_t kDigiLiveControlDebugMaxByteMessageLength = 512;
 constexpr uint32_t kDigi00xDuplexSampleRate44100 = 44100;
 constexpr uint32_t kDigi00xDuplexSampleRate48000 = 48000;
-constexpr uint32_t kDigi00xDuplexActiveSampleRate = kDigi00xDuplexSampleRate48000;
+constexpr uint32_t kDigi00xDuplexDefaultSampleRate = kDigi00xDuplexSampleRate48000;
 constexpr uint32_t kDigi00xDuplexLocalRateIndex44100 = 0;
 constexpr uint32_t kDigi00xDuplexLocalRateIndex48000 = 1;
-constexpr uint32_t kDigi00xDuplexActiveLocalRateIndex = kDigi00xDuplexLocalRateIndex48000;
 constexpr uint32_t kDigi00xDuplexCIPSFC44100 = 1;
 constexpr uint32_t kDigi00xDuplexCIPSFC48000 = 2;
-constexpr uint32_t kDigi00xDuplexActiveCIPSFC = kDigi00xDuplexCIPSFC48000;
 constexpr uint32_t kDigi00xCIPDBCMask = 0x000000ff;
 constexpr uint32_t kDigi00xCIPSYTMask = 0x0000ffff;
 constexpr uint32_t kDigi00xCIPFMTAM824 = 0x10;
@@ -373,17 +374,16 @@ constexpr size_t kDigi00xDuplexIRChannelSampleChannelCount = kDigi00xDuplexPCMAu
 constexpr size_t kDigi00xDuplexIRCaptureSummaryChannelCount = kDigi00xDuplexPCMAudioChannels;
 constexpr size_t kDigi00xDuplexIRCapturePCMFrameLimit = 8192;
 constexpr size_t kDigi00xDuplexIRCapturePCMChannelCount = 8;
-constexpr uint32_t kDigi00xDuplexIRCaptureSampleRate = kDigi00xDuplexActiveSampleRate;
 constexpr uint32_t kDigi00xDuplexAM824AudioLabel = 0x40;
-constexpr uint32_t kAudioDeviceZeroTimestampPeriod = 512;
+constexpr uint32_t kAudioDeviceZeroTimestampPeriod = 1024;
 constexpr uint32_t kAudioInputBufferFrameCount = 8192;
 constexpr uint32_t kAudioRingBufferFrameCount = 65536;
 constexpr uint32_t kAudioOutputStreamEnabled = 1;
-constexpr uint32_t kAudioOutputBufferFrameCount = 512;
+constexpr uint32_t kAudioOutputBufferFrameCount = 1024;
 constexpr uint32_t kAudioOutputRingBufferFrameCount = 65536;
 constexpr uint32_t kAudioOutputChannelCount = 8;
 constexpr uint32_t kAudioOutputBufferOffsetMode = 1;
-constexpr uint32_t kAudioOutputRingPrebufferFrames = 512;
+constexpr uint32_t kAudioOutputRingPrebufferFrames = 3072;
 constexpr uint32_t kAudioOutputRingKeepFrames = 0;
 constexpr uint32_t kAudioRuntimeCallbackRestartEnabled = 1;
 constexpr uint32_t kAudioRuntimeRestartReasonInputCallback = 1;
@@ -419,12 +419,10 @@ constexpr uint32_t kDigiLiveSequenceReplayMovingGuardMinStartDistancePackets = 4
 constexpr uint32_t kDigiLiveSequenceReplayMovingQueuePackets = 512;
 constexpr uint32_t kDigiLiveSequenceReplayMovingUpdatePackets = 80;
 constexpr uint32_t kDigiLiveSequenceReplayMovingLeadPackets = 4096;
-constexpr uint32_t kDigiLiveSequenceReplayPeriodDataBlocks =
-    kDigi00xDuplexActiveSampleRate / 100u;
 constexpr uint32_t kDigiLiveOutputPayloadUpdateEnabled = 1;
-constexpr uint32_t kDigiLiveOutputLeadPackets = 512;
-constexpr uint32_t kDigiLiveOutputServiceAheadPackets = 128;
-constexpr uint32_t kDigiLiveOutputSilenceAheadPackets = 512;
+constexpr uint32_t kDigiLiveOutputLeadPackets = 1024;
+constexpr uint32_t kDigiLiveOutputServiceAheadPackets = 256;
+constexpr uint32_t kDigiLiveOutputSilenceAheadPackets = 1024;
 constexpr uint32_t kDigiLiveOutputMaxPacketsPerPush = 512;
 constexpr uint32_t kDigiLiveOutputStopSilencePushCount = 2;
 constexpr uint32_t kDigiLiveRxCadencePeriodPackets = 80;
@@ -1190,6 +1188,14 @@ uint64_t gAudioRuntimeRestartDispatchCount = 0;
 uint64_t gAudioRuntimeRestartSuccessCount = 0;
 uint64_t gAudioRuntimeRestartSkippedCount = 0;
 uint64_t gAudioRuntimeRestartBusyCount = 0;
+uint32_t gDigi00xCurrentSampleRate = kDigi00xDuplexDefaultSampleRate;
+uint32_t gDigi00xCurrentLocalRateIndex = kDigi00xDuplexLocalRateIndex48000;
+uint32_t gDigi00xCurrentCIPSFC = kDigi00xDuplexCIPSFC48000;
+uint64_t gAudioRuntimeSampleRateChangeCount = 0;
+uint32_t gAudioRuntimeRequestedSampleRate = kDigi00xDuplexDefaultSampleRate;
+uint32_t gAudioRuntimeSampleRateChangeStage = 0;
+uint32_t gAudioRuntimeSampleRateChangeRestarted = 0;
+uint32_t gAudioRuntimeSampleRateChangeRet = static_cast<uint32_t>(kIOReturnNotReady);
 uint32_t gAudioOutputLastBufferFrameSize = 0;
 uint64_t gAudioOutputLastSampleTime = 0;
 uint32_t gAudioCaptureFrameCount = 0;
@@ -1380,6 +1386,7 @@ uint32_t gDigiLiveControlTransportSectionLastGroup = 0xffffffff;
 uint32_t gDigiLiveControlTransportSectionLastNote = 0xffffffff;
 uint32_t gDigiLiveControlTransportSectionLastIndex = 0xffffffff;
 uint64_t gDigiLiveControlTransportSectionUpdateCount = 0;
+uint32_t gDigiLiveControlNavigationModeLedNote = 0xffffffff;
 uint32_t gDigiLiveControlHardwareMonitorButtonPressed[kDigiLiveControlHardwareMonitorButtonCount] = {};
 uint32_t gDigiLiveControlHardwareMonitorLastNote = 0xffffffff;
 uint32_t gDigiLiveControlHardwareMonitorLastIndex = 0xffffffff;
@@ -1570,6 +1577,7 @@ uint32_t gDigiLiveOutputPushInProgress = 0;
 uint64_t gDigiLiveOutputPushBusyCount = 0;
 uint64_t gDigiLiveOutputPushAttemptCount = 0;
 uint64_t gDigiLiveOutputPushSuccessCount = 0;
+uint64_t gDigiLiveOutputWorkerPushAudioCount = 0;
 uint64_t gDigiLiveOutputWorkerPushSkippedAudioCount = 0;
 uint64_t gDigiLiveOutputPacketWriteCount = 0;
 uint64_t gDigiLiveOutputFrameWriteCount = 0;
@@ -1673,6 +1681,54 @@ DigiLiveStreamMayNeedStop();
 
 uint32_t
 Digi00xDuplexDataBlocksForPacket(uint32_t packetIndex);
+
+uint32_t
+Digi00xLocalRateIndexForSampleRate(uint32_t sampleRate)
+{
+    return sampleRate == kDigi00xDuplexSampleRate44100
+        ? kDigi00xDuplexLocalRateIndex44100
+        : kDigi00xDuplexLocalRateIndex48000;
+}
+
+uint32_t
+Digi00xCIPSFCForSampleRate(uint32_t sampleRate)
+{
+    return sampleRate == kDigi00xDuplexSampleRate44100
+        ? kDigi00xDuplexCIPSFC44100
+        : kDigi00xDuplexCIPSFC48000;
+}
+
+bool
+Digi00xSampleRateFromDouble(double sampleRate, uint32_t * sampleRateOut)
+{
+    uint32_t selectedRate = 0;
+    if (sampleRate > 44099.0 && sampleRate < 44101.0) {
+        selectedRate = kDigi00xDuplexSampleRate44100;
+    } else if (sampleRate > 47999.0 && sampleRate < 48001.0) {
+        selectedRate = kDigi00xDuplexSampleRate48000;
+    } else {
+        return false;
+    }
+
+    if (sampleRateOut != nullptr) {
+        *sampleRateOut = selectedRate;
+    }
+    return true;
+}
+
+void
+SetDigi00xRuntimeSampleRate(uint32_t sampleRate)
+{
+    gDigi00xCurrentSampleRate = sampleRate;
+    gDigi00xCurrentLocalRateIndex = Digi00xLocalRateIndexForSampleRate(sampleRate);
+    gDigi00xCurrentCIPSFC = Digi00xCIPSFCForSampleRate(sampleRate);
+}
+
+uint32_t
+DigiLiveSequenceReplayPeriodDataBlocks()
+{
+    return gDigi00xCurrentSampleRate / 100u;
+}
 
 bool
 AddNumberProperty(OSDictionary * properties, const char * key, uint64_t value, size_t bits)
@@ -1950,6 +2006,10 @@ PublishDigiLiveControlDiagnostics(uint32_t rawWordBE,
                       "ProbeControlStateTransportSectionUpdateCount",
                       gDigiLiveControlTransportSectionUpdateCount,
                       64);
+    AddNumberProperty(properties,
+                      "ProbeControlStateNavigationModeLedNote",
+                      gDigiLiveControlNavigationModeLedNote,
+                      32);
     AddNumberProperty(properties,
                       "ProbeControlStateHardwareMonitorLastNote",
                       gDigiLiveControlHardwareMonitorLastNote,
@@ -2257,6 +2317,14 @@ IsDigiLiveTransportSectionButton(uint32_t noteGroup, uint32_t note)
         return note <= 0x05u || note == 0x0cu;
     }
     return false;
+}
+
+bool
+IsDigiLiveNavigationModeLedButton(uint32_t noteGroup, uint32_t note)
+{
+    return noteGroup == kDigiLiveControlGroupNavigation &&
+           note >= kDigiLiveControlNoteNavModeBank &&
+           note <= kDigiLiveControlNoteNavModeZoom;
 }
 
 uint32_t
@@ -2679,6 +2747,35 @@ QueueDigiLiveMidiMessageToOutput(uint32_t portNibble,
 }
 
 bool
+QueueDigiLiveNavigationModeLed(uint8_t note)
+{
+    if (!IsDigiLiveNavigationModeLedButton(kDigiLiveControlGroupNavigation, note)) {
+        return false;
+    }
+
+    bool queued = true;
+    for (uint8_t current = kDigiLiveControlNoteNavModeBank;
+         current <= kDigiLiveControlNoteNavModeZoom;
+         ++current) {
+        uint8_t data2 = static_cast<uint8_t>(kDigiLiveControlGroupNavigation);
+        if (current == note) {
+            data2 |= 0x20u;
+        }
+        if (!QueueDigiLiveMidiMessageToOutput(kDigiLiveMidiControlPortNibble,
+                                              0x90u,
+                                              current,
+                                              data2)) {
+            queued = false;
+        }
+    }
+
+    if (queued) {
+        gDigiLiveControlNavigationModeLedNote = note;
+    }
+    return queued;
+}
+
+bool
 QueueDigiLiveMidiBytesToOutput(uint32_t portNibble,
                                const uint8_t * bytes,
                                uint32_t byteCount)
@@ -2818,9 +2915,19 @@ QueueDigiLiveDecodedMidiFeedback(uint32_t portNibble,
     }
     if (command == 0x80u || command == 0x90u) {
         uint8_t noteGroup = static_cast<uint8_t>(data2 & 0x0fu);
+        if (IsDigiLiveNavigationModeLedButton(noteGroup, data1)) {
+            bool active = (data2 & 0x60u) != 0;
+            if (active) {
+                if (QueueDigiLiveNavigationModeLed(data1)) {
+                    gDigiLiveMidiFeedbackMessageCount++;
+                    return true;
+                }
+            }
+            gDigiLiveMidiFeedbackSkippedCount++;
+            return false;
+        }
         if (noteGroup == kDigiLiveControlGroupAboveTransport ||
             noteGroup == kDigiLiveControlGroupHardwareMonitor ||
-            IsDigiLiveTransportSectionButton(noteGroup, data1) ||
             (noteGroup == kDigiLiveControlDisplayModeGroup &&
              data1 == kDigiLiveControlDisplayModeNote)) {
             gDigiLiveMidiFeedbackSkippedCount++;
@@ -3414,7 +3521,7 @@ RecordDigiLiveRxCadencePacket(uint32_t eventCount, bool continuous)
     gDigiLiveRxCadencePeriodCount++;
     if (gDigiLiveRxCadencePeriodCount >= kDigiLiveRxCadencePeriodPackets) {
         if (gDigiLiveRxCadenceObservedTotalDataBlocks ==
-            kDigiLiveSequenceReplayPeriodDataBlocks) {
+            DigiLiveSequenceReplayPeriodDataBlocks()) {
             uint32_t bestMismatchCount = 0xffffffff;
             uint32_t bestPhase = 0xffffffff;
             for (uint32_t phase = 0; phase < kDigiLiveRxCadencePeriodPackets; ++phase) {
@@ -3517,7 +3624,7 @@ UpdateDigiLiveReceiveTimingDiagnostics(volatile uint32_t * packetHeader,
     if (payloadRemainder == 0 &&
         cip.dbs == kDigi00xDuplexDataBlockQuadlets &&
         cip.fmt == kDigi00xCIPFMTAM824 &&
-        cip.fdf == kDigi00xDuplexActiveCIPSFC &&
+        cip.fdf == gDigi00xCurrentCIPSFC &&
         cip.sph == 0) {
         gDigiLiveRxStreamProcessorValidPacketCount++;
     }
@@ -3538,7 +3645,7 @@ UpdateDigiLiveReceiveTimingDiagnostics(volatile uint32_t * packetHeader,
     if (cip.fmt != kDigi00xCIPFMTAM824) {
         gDigiLiveRxUnexpectedFMTCount++;
     }
-    if (cip.fdf != kDigi00xDuplexActiveCIPSFC) {
+    if (cip.fdf != gDigi00xCurrentCIPSFC) {
         gDigiLiveRxUnexpectedFDFCount++;
     }
     if (eventCount < gDigiLiveRxMinEventCount) {
@@ -3859,6 +3966,10 @@ PublishAudioRuntimeDiagnostics()
                       "ProbeControlStateTransportSectionUpdateCount",
                       gDigiLiveControlTransportSectionUpdateCount,
                       64);
+    AddNumberProperty(properties,
+                      "ProbeControlStateNavigationModeLedNote",
+                      gDigiLiveControlNavigationModeLedNote,
+                      32);
     AddNumberProperty(properties,
                       "ProbeControlStateHardwareMonitorLastNote",
                       gDigiLiveControlHardwareMonitorLastNote,
@@ -4210,9 +4321,29 @@ PublishAudioRuntimeDiagnostics()
     AddNumberProperty(properties, "ProbeAudioRuntimeRefreshWorkerLivePublishSkipCount", gAudioRefreshWorkerLivePublishSkipCount, 64);
     AddNumberProperty(properties, "ProbeAudioRuntimeRefreshWorkerBacklogNoSleepCount", gAudioRefreshWorkerBacklogNoSleepCount, 64);
     AddNumberProperty(properties, "ProbeAudioRuntimeRefreshWorkerLowWaterNoSleepCount", gAudioRefreshWorkerLowWaterNoSleepCount, 64);
-    AddNumberProperty(properties, "ProbeAudioRuntimeSampleRate", kDigi00xDuplexActiveSampleRate, 32);
-    AddNumberProperty(properties, "ProbeAudioRuntimeDigiLocalRateIndex", kDigi00xDuplexActiveLocalRateIndex, 32);
-    AddNumberProperty(properties, "ProbeAudioRuntimeCIPSFC", kDigi00xDuplexActiveCIPSFC, 32);
+    AddNumberProperty(properties, "ProbeAudioRuntimeSampleRate", gDigi00xCurrentSampleRate, 32);
+    AddNumberProperty(properties, "ProbeAudioRuntimeDigiLocalRateIndex", gDigi00xCurrentLocalRateIndex, 32);
+    AddNumberProperty(properties, "ProbeAudioRuntimeCIPSFC", gDigi00xCurrentCIPSFC, 32);
+    AddNumberProperty(properties,
+                      "ProbeAudioRuntimeSampleRateChangeCount",
+                      gAudioRuntimeSampleRateChangeCount,
+                      64);
+    AddNumberProperty(properties,
+                      "ProbeAudioRuntimeRequestedSampleRate",
+                      gAudioRuntimeRequestedSampleRate,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeAudioRuntimeSampleRateChangeStage",
+                      gAudioRuntimeSampleRateChangeStage,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeAudioRuntimeSampleRateChangeRestarted",
+                      gAudioRuntimeSampleRateChangeRestarted,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeAudioRuntimeSampleRateChangeRet",
+                      gAudioRuntimeSampleRateChangeRet,
+                      32);
     AddNumberProperty(properties, "ProbeAudioRuntimeInputCallbackHarvestEnabled", kAudioCallbackHarvestEnabled, 32);
     AddNumberProperty(properties, "ProbeAudioRuntimeInputCallbackHarvestAttemptCount", gAudioInputCallbackHarvestAttemptCount, 32);
     AddNumberProperty(properties, "ProbeAudioRuntimeInputCallbackHarvestSuccessCount", gAudioInputCallbackHarvestSuccessCount, 32);
@@ -4295,6 +4426,10 @@ PublishAudioRuntimeDiagnostics()
     AddNumberProperty(properties, "ProbeDigiLiveOutputPushBusyCount", gDigiLiveOutputPushBusyCount, 64);
     AddNumberProperty(properties, "ProbeDigiLiveOutputPushAttemptCount", gDigiLiveOutputPushAttemptCount, 64);
     AddNumberProperty(properties, "ProbeDigiLiveOutputPushSuccessCount", gDigiLiveOutputPushSuccessCount, 64);
+    AddNumberProperty(properties,
+                      "ProbeDigiLiveOutputWorkerPushAudioCount",
+                      gDigiLiveOutputWorkerPushAudioCount,
+                      64);
     AddNumberProperty(properties,
                       "ProbeDigiLiveOutputWorkerPushSkippedAudioCount",
                       gDigiLiveOutputWorkerPushSkippedAudioCount,
@@ -4708,7 +4843,7 @@ PublishAudioRuntimeDiagnostics()
                       32);
     AddNumberProperty(properties,
                       "ProbeDigiLiveSequenceReplayPeriodDataBlocks",
-                      kDigiLiveSequenceReplayPeriodDataBlocks,
+                      DigiLiveSequenceReplayPeriodDataBlocks(),
                       32);
     AddNumberProperty(properties,
                       "ProbeDigiLiveSequenceReplayMovingQueueReadIndex",
@@ -5716,6 +5851,7 @@ ConfigureAudioDevice(FireWireOHCIProbe * driver)
     gDigiLiveControlTransportSectionLastNote = 0xffffffff;
     gDigiLiveControlTransportSectionLastIndex = 0xffffffff;
     gDigiLiveControlTransportSectionUpdateCount = 0;
+    gDigiLiveControlNavigationModeLedNote = 0xffffffff;
     for (uint32_t i = 0; i < kDigiLiveControlHardwareMonitorButtonCount; ++i) {
         gDigiLiveControlHardwareMonitorButtonPressed[i] = 0;
     }
@@ -5908,7 +6044,7 @@ ConfigureAudioDevice(FireWireOHCIProbe * driver)
         return kIOReturnNoMemory;
     }
 
-    IOUserAudioDevice * audioDevice = OSTypeAlloc(IOUserAudioDevice);
+    IOUserAudioDevice * audioDevice = OSTypeAlloc(FireWireOHCIProbeAudioDevice);
     if (audioDevice != nullptr &&
         !audioDevice->init(driver,
                            false,
@@ -5942,9 +6078,12 @@ ConfigureAudioDevice(FireWireOHCIProbe * driver)
     gAudioDevice->SetClockDomain(0);
     gAudioDevice->SetClockAlgorithm(IOUserAudioClockAlgorithm::Raw);
     gAudioDevice->SetClockIsStable(true);
-    double sampleRates[] = {static_cast<double>(kDigi00xDuplexIRCaptureSampleRate)};
-    gAudioDevice->SetAvailableSampleRates(sampleRates, 1);
-    gAudioDevice->SetSampleRate(static_cast<double>(kDigi00xDuplexIRCaptureSampleRate));
+    double sampleRates[] = {
+        static_cast<double>(kDigi00xDuplexSampleRate44100),
+        static_cast<double>(kDigi00xDuplexSampleRate48000),
+    };
+    gAudioDevice->SetAvailableSampleRates(sampleRates, 2);
+    gAudioDevice->SetSampleRate(static_cast<double>(gDigi00xCurrentSampleRate));
     gAudioZeroTimestampHostTime = mach_absolute_time();
     gAudioDevice->UpdateCurrentZeroTimestamp(0, gAudioZeroTimestampHostTime);
     IOUserAudioChannelLabel inputLayout[kDigi00xDuplexIRCapturePCMChannelCount] = {
@@ -5973,22 +6112,31 @@ ConfigureAudioDevice(FireWireOHCIProbe * driver)
     }
     gAudioDevice->SetPreferredChannelsForStereo(1, 2);
 
-    IOUserAudioStreamBasicDescription streamFormat = {};
-    streamFormat.mSampleRate = static_cast<double>(kDigi00xDuplexIRCaptureSampleRate);
-    streamFormat.mFormatID = IOUserAudioFormatID::LinearPCM;
-    streamFormat.mFormatFlags = static_cast<IOUserAudioFormatFlags>(
-        FormatFlagIsSignedInteger | FormatFlagIsPacked);
-    streamFormat.mBytesPerPacket = kAudioInputBytesPerFrame;
-    streamFormat.mFramesPerPacket = 1;
-    streamFormat.mBytesPerFrame = kAudioInputBytesPerFrame;
-    streamFormat.mChannelsPerFrame = kDigi00xDuplexIRCapturePCMChannelCount;
-    streamFormat.mBitsPerChannel = kAudioInputBytesPerSample * 8;
+    IOUserAudioStreamBasicDescription inputStreamFormats[2] = {};
+    IOUserAudioStreamBasicDescription outputStreamFormats[2] = {};
+    for (uint32_t rateIndex = 0; rateIndex < 2; ++rateIndex) {
+        double rate = rateIndex == 0
+            ? static_cast<double>(kDigi00xDuplexSampleRate44100)
+            : static_cast<double>(kDigi00xDuplexSampleRate48000);
+        inputStreamFormats[rateIndex].mSampleRate = rate;
+        inputStreamFormats[rateIndex].mFormatID = IOUserAudioFormatID::LinearPCM;
+        inputStreamFormats[rateIndex].mFormatFlags = static_cast<IOUserAudioFormatFlags>(
+            FormatFlagIsSignedInteger | FormatFlagIsPacked);
+        inputStreamFormats[rateIndex].mBytesPerPacket = kAudioInputBytesPerFrame;
+        inputStreamFormats[rateIndex].mFramesPerPacket = 1;
+        inputStreamFormats[rateIndex].mBytesPerFrame = kAudioInputBytesPerFrame;
+        inputStreamFormats[rateIndex].mChannelsPerFrame =
+            kDigi00xDuplexIRCapturePCMChannelCount;
+        inputStreamFormats[rateIndex].mBitsPerChannel = kAudioInputBytesPerSample * 8;
 
-    IOUserAudioStreamBasicDescription outputStreamFormat = streamFormat;
-    outputStreamFormat.mBytesPerPacket = kAudioOutputBytesPerFrame;
-    outputStreamFormat.mBytesPerFrame = kAudioOutputBytesPerFrame;
-    outputStreamFormat.mChannelsPerFrame = kAudioOutputChannelCount;
-    outputStreamFormat.mBitsPerChannel = kAudioOutputBytesPerSample * 8;
+        outputStreamFormats[rateIndex] = inputStreamFormats[rateIndex];
+        outputStreamFormats[rateIndex].mBytesPerPacket = kAudioOutputBytesPerFrame;
+        outputStreamFormats[rateIndex].mBytesPerFrame = kAudioOutputBytesPerFrame;
+        outputStreamFormats[rateIndex].mChannelsPerFrame = kAudioOutputChannelCount;
+        outputStreamFormats[rateIndex].mBitsPerChannel = kAudioOutputBytesPerSample * 8;
+    }
+    uint32_t currentFormatIndex =
+        gDigi00xCurrentSampleRate == kDigi00xDuplexSampleRate44100 ? 0u : 1u;
 
     gAudioInputStream = IOUserAudioStream::Create(driver,
                                                   IOUserAudioStreamDirection::Input,
@@ -5999,8 +6147,8 @@ ConfigureAudioDevice(FireWireOHCIProbe * driver)
     }
     gAudioStreamCreateRet = ReturnCodeToProperty(kIOReturnSuccess);
     SetAudioObjectName(gAudioInputStream.get(), "Digi 003 Inputs 1-8");
-    gAudioInputStream->SetAvailableStreamFormats(&streamFormat, 1);
-    gAudioInputStream->SetCurrentStreamFormat(&streamFormat);
+    gAudioInputStream->SetAvailableStreamFormats(inputStreamFormats, 2);
+    gAudioInputStream->SetCurrentStreamFormat(&inputStreamFormats[currentFormatIndex]);
     gAudioInputStream->SetTerminalType(IOUserAudioStreamTerminalType::Line);
     gAudioInputStream->SetStartingChannel(1);
     gAudioInputStream->SetLatency(kAudioDeviceZeroTimestampPeriod);
@@ -6021,8 +6169,8 @@ ConfigureAudioDevice(FireWireOHCIProbe * driver)
         }
         gAudioOutputStreamCreateRet = ReturnCodeToProperty(kIOReturnSuccess);
         SetAudioObjectName(gAudioOutputStream.get(), "Digi 003 Outputs 1-8");
-        gAudioOutputStream->SetAvailableStreamFormats(&outputStreamFormat, 1);
-        gAudioOutputStream->SetCurrentStreamFormat(&outputStreamFormat);
+        gAudioOutputStream->SetAvailableStreamFormats(outputStreamFormats, 2);
+        gAudioOutputStream->SetCurrentStreamFormat(&outputStreamFormats[currentFormatIndex]);
         gAudioOutputStream->SetTerminalType(IOUserAudioStreamTerminalType::Line);
         gAudioOutputStream->SetStartingChannel(1);
         gAudioOutputStream->SetLatency(kAudioDeviceZeroTimestampPeriod);
@@ -6079,7 +6227,7 @@ ConfigureAudioDevice(FireWireOHCIProbe * driver)
     if (gAudioAddObjectRet == ReturnCodeToProperty(kIOReturnSuccess)) {
         gAudioRegisterIOThreadRet =
             ReturnCodeToProperty(gAudioDevice->_RegisterIOThread(gAudioDevice->GetObjectID(),
-                                                                 static_cast<double>(kDigi00xDuplexIRCaptureSampleRate),
+                                                                 static_cast<double>(gDigi00xCurrentSampleRate),
                                                                  kAudioDeviceZeroTimestampPeriod));
     }
     return static_cast<kern_return_t>(gAudioAddObjectRet);
@@ -7588,7 +7736,7 @@ InitializeDigiDuplexDiagnostics(DigiDuplexDiagnostics * diagnostics)
     diagnostics->irCapturePCMFrameLimit = kDigi00xDuplexIRCapturePCMFrameLimit;
     diagnostics->irCapturePCMFrameCount = 0;
     diagnostics->irCapturePCMChannelCount = kDigi00xDuplexIRCapturePCMChannelCount;
-    diagnostics->irCapturePCMSampleRate = kDigi00xDuplexIRCaptureSampleRate;
+    diagnostics->irCapturePCMSampleRate = gDigi00xCurrentSampleRate;
     diagnostics->irCapturePCMBytes = 0;
     diagnostics->irCapturePCMPeakAbs = 0;
     for (size_t frame = 0; frame < kDigi00xDuplexIRCapturePCMFrameLimit; ++frame) {
@@ -7829,7 +7977,7 @@ BuildIsoTransmitHeader1(uint32_t dataLength)
 uint32_t
 Digi00xDuplexDataBlocksForPacket(uint32_t packetIndex)
 {
-    if (kDigi00xDuplexActiveSampleRate == kDigi00xDuplexSampleRate48000) {
+    if (gDigi00xCurrentSampleRate == kDigi00xDuplexSampleRate48000) {
         return 6u;
     }
 
@@ -8007,7 +8155,7 @@ RecordDigiLiveSequenceReplayPacket(uint32_t dataBlocks, bool continuous)
     gDigiLiveSequenceReplayPeriodCount++;
     if (gDigiLiveSequenceReplayPeriodCount >= kDigiLiveSequenceReplayPeriodPackets) {
         if (gDigiLiveSequenceReplayObservedTotalDataBlocks ==
-            kDigiLiveSequenceReplayPeriodDataBlocks) {
+            DigiLiveSequenceReplayPeriodDataBlocks()) {
             gDigiLiveSequenceReplayReady = 1;
         } else {
             gDigiLiveSequenceReplayBadTotalCount++;
@@ -8062,7 +8210,7 @@ UpdateDigiLiveTransmitPacketDescriptor(volatile OHCIAsyncDescriptor * itDescript
     uint32_t cipHeader1 =
         0x80000000u |
         (0x10u << 24) |
-        (kDigi00xDuplexActiveCIPSFC << 16) |
+        (gDigi00xCurrentCIPSFC << 16) |
         0xffffu;
 
     volatile uint32_t * immediateHeader = reinterpret_cast<volatile uint32_t *>(&packetDescriptor[1]);
@@ -8189,6 +8337,7 @@ ResetDigiLiveOutputState()
     gDigiLiveOutputPushBusyCount = 0;
     gDigiLiveOutputPushAttemptCount = 0;
     gDigiLiveOutputPushSuccessCount = 0;
+    gDigiLiveOutputWorkerPushAudioCount = 0;
     gDigiLiveOutputWorkerPushSkippedAudioCount = 0;
     gDigiLiveOutputPacketWriteCount = 0;
     gDigiLiveOutputFrameWriteCount = 0;
@@ -8876,7 +9025,7 @@ RefreshDigiLiveMovingSequenceReplay()
 
         if (cadenceSource == 0 &&
             kDigiLiveSequenceReplayMovingLearnCadenceFromQueue != 0 &&
-            rawTotalDataBlocks == kDigiLiveSequenceReplayPeriodDataBlocks) {
+            rawTotalDataBlocks == DigiLiveSequenceReplayPeriodDataBlocks()) {
             uint32_t queuePhase = 0xffffffff;
             uint32_t queueMismatchCount = 0xffffffff;
             if (FindDigiLiveMovingReplayQueueBestPhase(kDigiLiveSequenceReplayMovingUpdatePackets,
@@ -8926,11 +9075,11 @@ RefreshDigiLiveMovingSequenceReplay()
             gDigiLiveSequenceReplayMovingLastSyncRet = ReturnCodeToProperty(kIOReturnBadArgument);
             return kIOReturnBadArgument;
         }
-        totalDataBlocks = kDigiLiveSequenceReplayPeriodDataBlocks;
+        totalDataBlocks = DigiLiveSequenceReplayPeriodDataBlocks();
     }
     gDigiLiveSequenceReplayMovingLastTotalDataBlocks = totalDataBlocks;
     if (!useCadencePhase &&
-        totalDataBlocks != kDigiLiveSequenceReplayPeriodDataBlocks) {
+        totalDataBlocks != DigiLiveSequenceReplayPeriodDataBlocks()) {
         gDigiLiveSequenceReplayMovingBadTotalCount++;
         ClearDigiLiveMovingReplayQueue();
         gDigiLiveSequenceReplayMovingLastSyncRet = ReturnCodeToProperty(kIOReturnBadArgument);
@@ -9032,7 +9181,7 @@ RefreshDigiLiveMovingSequenceReplay()
         dataBlockCounter = (dataBlockCounter + dataBlocks) & 0xffu;
     }
     gDigiLiveSequenceReplayMovingLastTotalDataBlocks = calculatedTotalDataBlocks;
-    if (calculatedTotalDataBlocks != kDigiLiveSequenceReplayPeriodDataBlocks) {
+    if (calculatedTotalDataBlocks != DigiLiveSequenceReplayPeriodDataBlocks()) {
         gDigiLiveSequenceReplayMovingBadTotalCount++;
         ClearDigiLiveMovingReplayQueue();
         gDigiLiveSequenceReplayMovingLastSyncRet = ReturnCodeToProperty(kIOReturnBadArgument);
@@ -9125,7 +9274,7 @@ RunDigiDuplexIsoProbe(IOPCIDevice * pciDevice, uint8_t memoryIndex, DigiDuplexDi
         uint32_t cipHeader1 =
             0x80000000u |
             (0x10u << 24) |
-            (kDigi00xDuplexActiveCIPSFC << 16) |
+            (gDigi00xCurrentCIPSFC << 16) |
             0xffffu;
 
         packetDescriptor[0].reqCount = 8;
@@ -9898,7 +10047,7 @@ RunDigiDuplexProbe(IOPCIDevice * pciDevice,
                                  0,
                                  kDigiDuplexOpWrite,
                                  kDigi00xOffsetLocalRate,
-                                 kDigi00xDuplexActiveLocalRateIndex,
+                                 gDigi00xCurrentLocalRateIndex,
                                  tlabelBase);
     IOSleep(20);
 
@@ -10188,7 +10337,7 @@ RunDigiLiveBeginTransactions()
                                  0,
                                  kDigiDuplexOpWrite,
                                  kDigi00xOffsetLocalRate,
-                                 kDigi00xDuplexActiveLocalRateIndex,
+                                 gDigi00xCurrentLocalRateIndex,
                                  tlabelBase,
                                  kDigiLiveAsyncAttemptCount,
                                  kDigiLiveAsyncWaitLoopsPerAttempt,
@@ -10431,7 +10580,7 @@ ConfigureDigiLiveTransmitDescriptors(volatile OHCIAsyncDescriptor * itDescriptor
         uint32_t cipHeader1 =
             0x80000000u |
             (0x10u << 24) |
-            (kDigi00xDuplexActiveCIPSFC << 16) |
+            (gDigi00xCurrentCIPSFC << 16) |
             0xffffu;
 
         packetDescriptor[0].reqCount = 8;
@@ -12316,11 +12465,13 @@ StartAudioRefreshWorker()
             gAudioRefreshWorkerLastGeneration = gAudioCaptureGeneration;
 
             if (gDigiLiveRunning != 0) {
-                if (AudioOutputRingFillFrames() == 0) {
-                    (void)PushAudioOutputToDigiLiveTransmit();
+                uint32_t outputFillFrames = AudioOutputRingFillFrames();
+                if (outputFillFrames != 0 || gAudioOutputRingPrebuffered != 0) {
+                    gDigiLiveOutputWorkerPushAudioCount++;
                 } else {
                     gDigiLiveOutputWorkerPushSkippedAudioCount++;
                 }
+                (void)PushAudioOutputToDigiLiveTransmit();
                 if ((gAudioRefreshWorkerIterationCount % kDigiLiveWorkerPublishInterval) == 0) {
                     gAudioRefreshWorkerLivePublishCount++;
                     PublishAudioRuntimeDiagnostics();
@@ -13192,6 +13343,10 @@ IMPL(FireWireOHCIProbe, Start)
         AddNumberProperty(diagnostics, "ProbeAudioOutputRingKeepFrames", kAudioOutputRingKeepFrames, 32);
         AddNumberProperty(diagnostics, "ProbeDigiLiveOutputServiceAheadPackets", kDigiLiveOutputServiceAheadPackets, 32);
         AddNumberProperty(diagnostics, "ProbeDigiLiveOutputSilenceAheadPackets", kDigiLiveOutputSilenceAheadPackets, 32);
+        AddNumberProperty(diagnostics,
+                          "ProbeDigiLiveOutputWorkerPushAudioCount",
+                          gDigiLiveOutputWorkerPushAudioCount,
+                          64);
         AddNumberProperty(diagnostics,
                           "ProbeDigiLiveOutputWorkerPushSkippedAudioCount",
                           gDigiLiveOutputWorkerPushSkippedAudioCount,
@@ -14131,6 +14286,74 @@ IMPL(FireWireOHCIProbe, Start)
 }
 
 kern_return_t
+FireWireOHCIProbeAudioDevice::HandleChangeSampleRate(double in_sample_rate)
+{
+    gAudioRuntimeSampleRateChangeCount++;
+    gAudioRuntimeSampleRateChangeStage = 1;
+    gAudioRuntimeSampleRateChangeRestarted = 0;
+    gAudioRuntimeSampleRateChangeRet = ReturnCodeToProperty(kIOReturnNotReady);
+
+    uint32_t requestedSampleRate = 0;
+    if (!Digi00xSampleRateFromDouble(in_sample_rate, &requestedSampleRate)) {
+        gAudioRuntimeRequestedSampleRate = static_cast<uint32_t>(in_sample_rate);
+        gAudioRuntimeSampleRateChangeRet = ReturnCodeToProperty(kIOReturnBadArgument);
+        PublishAudioRuntimeDiagnostics();
+        return kIOReturnBadArgument;
+    }
+
+    gAudioRuntimeRequestedSampleRate = requestedSampleRate;
+    bool sampleRateChanged = requestedSampleRate != gDigi00xCurrentSampleRate;
+    bool liveWasRunning = sampleRateChanged &&
+        (gAudioRefreshWorkerRunning != 0 || DigiLiveStreamMayNeedStop());
+
+    if (liveWasRunning) {
+        gAudioRuntimeSampleRateChangeStage = 2;
+        StopAudioRefreshWorker(true, false);
+        if (DigiLiveStreamMayNeedStop()) {
+            (void)StopDigiLiveStreamForAudio();
+        }
+        ResetAudioRingBuffer();
+        ResetAudioOutputRingBuffer();
+        ResetDigiLiveOutputState();
+        ClearAudioInputBuffer();
+        ClearAudioOutputBuffer();
+    }
+
+    gAudioRuntimeSampleRateChangeStage = 3;
+    SetDigi00xRuntimeSampleRate(requestedSampleRate);
+    kern_return_t ret =
+        IOUserAudioDevice::HandleChangeSampleRate(static_cast<double>(requestedSampleRate));
+    if (ret == kIOReturnSuccess && gAudioInputStream) {
+        ret = gAudioInputStream->DeviceSampleRateChanged(static_cast<double>(requestedSampleRate));
+    }
+    if (ret == kIOReturnSuccess && gAudioOutputStream) {
+        ret = gAudioOutputStream->DeviceSampleRateChanged(static_cast<double>(requestedSampleRate));
+    }
+
+    if (ret == kIOReturnSuccess && liveWasRunning) {
+        gAudioRuntimeSampleRateChangeStage = 4;
+        kern_return_t liveRet = StartDigiLiveStreamForAudio();
+        if (liveRet == kIOReturnSuccess) {
+            PrebufferDigiLiveAudio();
+            StartAudioRefreshWorker();
+            gAudioRuntimeSampleRateChangeRestarted = 1;
+        } else {
+            ret = liveRet;
+        }
+    }
+
+    gAudioRuntimeSampleRateChangeStage = 5;
+    gAudioRuntimeSampleRateChangeRet = ReturnCodeToProperty(ret);
+    os_log(OS_LOG_DEFAULT,
+           "FireWireOHCIProbe: sample rate change requested=%u ret=0x%x restarted=%u",
+           requestedSampleRate,
+           ret,
+           gAudioRuntimeSampleRateChangeRestarted);
+    PublishAudioRuntimeDiagnostics();
+    return ret;
+}
+
+kern_return_t
 FireWireOHCIProbe::StartDevice(IOUserAudioObjectID in_object_id,
                                IOUserAudioStartStopFlags in_flags)
 {
@@ -14173,7 +14396,7 @@ FireWireOHCIProbe::StartDevice(IOUserAudioObjectID in_object_id,
         gAudioDevice->UpdateCurrentZeroTimestamp(0, gAudioZeroTimestampHostTime);
         gAudioStartIOThreadRet =
             ReturnCodeToProperty(gAudioDevice->_StartIOThread(gAudioDevice->GetObjectID(),
-                                                              static_cast<double>(kDigi00xDuplexIRCaptureSampleRate),
+                                                              static_cast<double>(gDigi00xCurrentSampleRate),
                                                               kAudioDeviceZeroTimestampPeriod));
     }
     if (gAudioInputStream) {

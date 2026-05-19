@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 enum {
@@ -17,6 +18,14 @@ enum {
     kDebugSelectorMidiBytes = 2,
     kMaxRawMidiBytesPerCall = 512,
     kDecodedRecentCapacity = 256,
+    kFaderFeedbackChannelCount = 8,
+    kSysexThrottleLineCount = 256,
+    kSysexPayloadRememberBytes = 32,
+    kDigi003DisplayPayloadOffset = 7,
+    kDigi003DisplayPayloadLength = 7,
+    kDigi003DisplayClassUnknown = 0,
+    kDigi003DisplayClassValue = 1,
+    kDigi003DisplayClassName = 2,
 };
 
 static const char *kDefaultPortName = "Avid 003 Port 3 (Control)";
@@ -27,6 +36,13 @@ static io_connect_t g_debug_connect = IO_OBJECT_NULL;
 static bool g_verbose = false;
 static bool g_forward_feedback_to_driver = true;
 static FILE *g_feedback_log = NULL;
+static uint64_t g_fader_feedback_last_forward_ns[kFaderFeedbackChannelCount] = {0};
+static uint8_t g_fader_feedback_last_value[kFaderFeedbackChannelCount] = {0};
+static bool g_fader_feedback_last_valid[kFaderFeedbackChannelCount] = {false};
+static uint64_t g_sysex_line_last_forward_ns[kSysexThrottleLineCount] = {0};
+static UInt16 g_sysex_line_last_length[kSysexThrottleLineCount] = {0};
+static uint8_t g_sysex_line_last_payload[kSysexThrottleLineCount][kSysexPayloadRememberBytes] = {{0}};
+static uint8_t g_sysex_line_last_class[kSysexThrottleLineCount] = {0};
 
 static void handle_signal(int signo)
 {
@@ -142,6 +158,170 @@ static bool driver_feedback_ready(void)
     uint32_t running = 0;
     return read_u32_property(g_probe_service, CFSTR("ProbeDigiLiveRunning"), &running) &&
            running != 0;
+}
+
+static uint64_t monotonic_ns(void)
+{
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) {
+        return 0;
+    }
+    return ((uint64_t)ts.tv_sec * 1000000000ull) + (uint64_t)ts.tv_nsec;
+}
+
+static bool is_digi003_display_sysex(const uint8_t *bytes, UInt16 length, uint8_t *line)
+{
+    if (bytes == NULL || length < 6 || line == NULL) {
+        return false;
+    }
+    if (bytes[0] != 0xf0u ||
+        bytes[1] != 0x13u ||
+        bytes[2] != 0x01u ||
+        bytes[3] != 0x40u) {
+        return false;
+    }
+    *line = bytes[4];
+    return true;
+}
+
+static bool ascii_digit(uint8_t value)
+{
+    return value >= '0' && value <= '9';
+}
+
+static bool ascii_alpha(uint8_t value)
+{
+    return (value >= 'A' && value <= 'Z') || (value >= 'a' && value <= 'z');
+}
+
+static uint8_t classify_digi003_display_sysex(const uint8_t *bytes, UInt16 length)
+{
+    if (bytes == NULL || length < (kDigi003DisplayPayloadOffset + kDigi003DisplayPayloadLength)) {
+        return kDigi003DisplayClassUnknown;
+    }
+
+    bool has_alpha = false;
+    bool has_digit = false;
+    for (UInt16 i = 0; i < kDigi003DisplayPayloadLength; ++i) {
+        uint8_t value = bytes[kDigi003DisplayPayloadOffset + i];
+        has_alpha = has_alpha || ascii_alpha(value);
+        has_digit = has_digit || ascii_digit(value);
+    }
+
+    if (has_alpha) {
+        return kDigi003DisplayClassName;
+    }
+    if (has_digit) {
+        return kDigi003DisplayClassValue;
+    }
+    return kDigi003DisplayClassUnknown;
+}
+
+static bool is_digi003_transport_counter_sysex(const uint8_t *bytes, UInt16 length, uint8_t line)
+{
+    if (bytes == NULL || length < (kDigi003DisplayPayloadOffset + kDigi003DisplayPayloadLength + 1)) {
+        return false;
+    }
+
+    const uint8_t *payload = bytes + kDigi003DisplayPayloadOffset;
+    if (line == 0x06u) {
+        return payload[0] == ' ' &&
+               payload[1] == ' ' &&
+               payload[2] == ' ' &&
+               payload[3] == ' ' &&
+               ascii_digit(payload[4]) &&
+               ascii_digit(payload[5]) &&
+               ascii_digit(payload[6]);
+    }
+
+    if (line == 0x07u) {
+        return payload[0] == '|' &&
+               ascii_digit(payload[1]) &&
+               payload[2] == '|' &&
+               ascii_digit(payload[3]) &&
+               ascii_digit(payload[4]) &&
+               ascii_digit(payload[5]) &&
+               payload[6] == ' ';
+    }
+
+    return false;
+}
+
+static bool should_forward_sysex_to_driver(const uint8_t *bytes, UInt16 length)
+{
+    uint8_t line = 0;
+    if (!is_digi003_display_sysex(bytes, length, &line)) {
+        return true;
+    }
+
+    if (is_digi003_transport_counter_sysex(bytes, length, line)) {
+        return false;
+    }
+
+    UInt16 remembered = length < kSysexPayloadRememberBytes ? length : kSysexPayloadRememberBytes;
+    bool duplicate =
+        g_sysex_line_last_length[line] == remembered &&
+        memcmp(g_sysex_line_last_payload[line], bytes, remembered) == 0;
+
+    uint64_t now = monotonic_ns();
+    uint64_t last = g_sysex_line_last_forward_ns[line];
+    uint8_t payload_class = classify_digi003_display_sysex(bytes, length);
+    bool class_changed =
+        payload_class != kDigi003DisplayClassUnknown &&
+        g_sysex_line_last_class[line] != kDigi003DisplayClassUnknown &&
+        payload_class != g_sysex_line_last_class[line];
+    uint64_t min_interval_ns = 50000000ull;
+    if (class_changed) {
+        min_interval_ns = 10000000ull;
+    }
+
+    if (now != 0 && last != 0) {
+        uint64_t age = now - last;
+        if (age < min_interval_ns || (duplicate && age < 250000000ull)) {
+            return false;
+        }
+    }
+
+    g_sysex_line_last_forward_ns[line] = now;
+    g_sysex_line_last_length[line] = remembered;
+    g_sysex_line_last_class[line] = payload_class;
+    memcpy(g_sysex_line_last_payload[line], bytes, remembered);
+    return true;
+}
+
+static bool should_forward_short_message_to_driver(uint8_t status, uint8_t data1, uint8_t data2)
+{
+    uint8_t command = status & 0xf0u;
+    if (command == 0x80u || command == 0x90u) {
+        return true;
+    }
+
+    if (command != 0xb0u) {
+        return false;
+    }
+
+    if (data1 > 0x3fu) {
+        return false;
+    }
+
+    uint8_t channel = data1 & 0x07u;
+    uint64_t now = monotonic_ns();
+    uint8_t last = g_fader_feedback_last_value[channel];
+    uint8_t delta = data2 > last ? data2 - last : last - data2;
+    uint64_t age = now - g_fader_feedback_last_forward_ns[channel];
+    bool should_forward =
+        !g_fader_feedback_last_valid[channel] ||
+        delta >= 4u ||
+        (data2 != last && age >= 33333333ull);
+
+    if (!should_forward) {
+        return false;
+    }
+
+    g_fader_feedback_last_valid[channel] = true;
+    g_fader_feedback_last_value[channel] = data2;
+    g_fader_feedback_last_forward_ns[channel] = now;
+    return true;
 }
 
 static void send_coremidi_message(MIDIEndpointRef source, uint8_t status, uint8_t data1, uint8_t data2)
@@ -300,21 +480,26 @@ static void midi_read_proc(const MIDIPacketList *packet_list, void *read_proc_re
         }
 
         if (packet->length > 0 && packet->data[0] == 0xf0u) {
-            kern_return_t ret = send_debug_midi_bytes(kControlPort, packet->data, packet->length);
-            if (g_verbose) {
-                printf("from CoreMIDI sysex len=%u -> driver ret=0x%08x%s\n",
-                       packet->length,
-                       ret,
-                       g_forward_feedback_to_driver ? "" : " (disabled)");
+            if (should_forward_sysex_to_driver(packet->data, packet->length)) {
+                kern_return_t ret = send_debug_midi_bytes(kControlPort, packet->data, packet->length);
+                if (g_verbose) {
+                    printf("from CoreMIDI sysex len=%u -> driver ret=0x%08x%s\n",
+                           packet->length,
+                           ret,
+                           g_forward_feedback_to_driver ? "" : " (disabled)");
+                    fflush(stdout);
+                }
+                if (ret != KERN_SUCCESS &&
+                    ret != kIOReturnNotReady &&
+                    g_forward_feedback_to_driver) {
+                    fprintf(stderr,
+                            "bridge: failed to send MIDI sysex feedback to driver: 0x%08x (%s)\n",
+                            ret,
+                            mach_error_string(ret));
+                }
+            } else if (g_verbose) {
+                printf("from CoreMIDI sysex len=%u -> driver throttled\n", packet->length);
                 fflush(stdout);
-            }
-            if (ret != KERN_SUCCESS &&
-                ret != kIOReturnNotReady &&
-                g_forward_feedback_to_driver) {
-                fprintf(stderr,
-                        "bridge: failed to send MIDI sysex feedback to driver: 0x%08x (%s)\n",
-                        ret,
-                        mach_error_string(ret));
             }
         }
 
@@ -354,6 +539,10 @@ static void midi_read_proc(const MIDIPacketList *packet_list, void *read_proc_re
                     break;
                 }
                 data2 = packet->data[i++];
+            }
+
+            if (!should_forward_short_message_to_driver(status, data1, data2)) {
+                continue;
             }
 
             kern_return_t ret = send_debug_midi(kControlPort, status, data1, data2);
