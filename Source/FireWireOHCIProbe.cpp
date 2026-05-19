@@ -262,6 +262,9 @@ constexpr uint32_t kDigiLiveControlKindModeViewButton = 18;
 constexpr uint32_t kDigiLiveControlKindEncoderAssignButton = 19;
 constexpr uint32_t kDigiLiveControlKindRotaryEncoder = 20;
 constexpr uint32_t kDigiLiveControlKindAboveTransportButton = 21;
+constexpr uint32_t kDigiLiveControlKindTransportSectionButton = 22;
+constexpr uint32_t kDigiLiveControlKindHardwareMonitorButton = 23;
+constexpr uint32_t kDigiLiveControlKindDisplayModeButton = 24;
 constexpr uint32_t kDigiLiveControlNoteChannelSelect = 0x00;
 constexpr uint32_t kDigiLiveControlNoteChannelSolo = 0x01;
 constexpr uint32_t kDigiLiveControlNoteChannelMute = 0x02;
@@ -288,6 +291,12 @@ constexpr uint32_t kDigiLiveControlModeViewButtonCount = 20;
 constexpr uint32_t kDigiLiveControlModeViewFirstNote = 0x00;
 constexpr uint32_t kDigiLiveControlEncoderAssignButtonCount = 8;
 constexpr uint32_t kDigiLiveControlAboveTransportButtonCount = 32;
+constexpr uint32_t kDigiLiveControlTransportSectionGroupCount = 2;
+constexpr uint32_t kDigiLiveControlTransportSectionSlotsPerGroup = 16;
+constexpr uint32_t kDigiLiveControlTransportSectionButtonCount =
+    kDigiLiveControlTransportSectionGroupCount *
+    kDigiLiveControlTransportSectionSlotsPerGroup;
+constexpr uint32_t kDigiLiveControlHardwareMonitorButtonCount = 16;
 constexpr uint32_t kDigiLiveControlRotaryEncoderCount = 8;
 constexpr uint32_t kDigiLiveControlCCRotaryEncoderFirst = 0x40;
 constexpr uint32_t kDigiLiveControlCCJogWheel = 0x4e;
@@ -1354,6 +1363,17 @@ uint32_t gDigiLiveControlAboveTransportButtonPressed[kDigiLiveControlAboveTransp
 uint32_t gDigiLiveControlAboveTransportLastNote = 0xffffffff;
 uint32_t gDigiLiveControlAboveTransportLastIndex = 0xffffffff;
 uint64_t gDigiLiveControlAboveTransportUpdateCount = 0;
+uint32_t gDigiLiveControlTransportSectionButtonPressed[kDigiLiveControlTransportSectionButtonCount] = {};
+uint32_t gDigiLiveControlTransportSectionLastGroup = 0xffffffff;
+uint32_t gDigiLiveControlTransportSectionLastNote = 0xffffffff;
+uint32_t gDigiLiveControlTransportSectionLastIndex = 0xffffffff;
+uint64_t gDigiLiveControlTransportSectionUpdateCount = 0;
+uint32_t gDigiLiveControlHardwareMonitorButtonPressed[kDigiLiveControlHardwareMonitorButtonCount] = {};
+uint32_t gDigiLiveControlHardwareMonitorLastNote = 0xffffffff;
+uint32_t gDigiLiveControlHardwareMonitorLastIndex = 0xffffffff;
+uint64_t gDigiLiveControlHardwareMonitorUpdateCount = 0;
+uint32_t gDigiLiveControlDisplayModePressed = 0;
+uint64_t gDigiLiveControlDisplayModeUpdateCount = 0;
 uint32_t gDigiLiveControlEncoderAssignButtonPressed[kDigiLiveControlEncoderAssignButtonCount] = {};
 uint32_t gDigiLiveControlEncoderAssignLastNote = 0xffffffff;
 uint32_t gDigiLiveControlEncoderAssignLastIndex = 0xffffffff;
@@ -1902,6 +1922,42 @@ PublishDigiLiveControlDiagnostics(uint32_t rawWordBE,
                       gDigiLiveControlAboveTransportUpdateCount,
                       64);
     AddNumberProperty(properties,
+                      "ProbeControlStateTransportSectionLastGroup",
+                      gDigiLiveControlTransportSectionLastGroup,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeControlStateTransportSectionLastNote",
+                      gDigiLiveControlTransportSectionLastNote,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeControlStateTransportSectionLastIndex",
+                      gDigiLiveControlTransportSectionLastIndex,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeControlStateTransportSectionUpdateCount",
+                      gDigiLiveControlTransportSectionUpdateCount,
+                      64);
+    AddNumberProperty(properties,
+                      "ProbeControlStateHardwareMonitorLastNote",
+                      gDigiLiveControlHardwareMonitorLastNote,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeControlStateHardwareMonitorLastIndex",
+                      gDigiLiveControlHardwareMonitorLastIndex,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeControlStateHardwareMonitorUpdateCount",
+                      gDigiLiveControlHardwareMonitorUpdateCount,
+                      64);
+    AddNumberProperty(properties,
+                      "ProbeControlStateDisplayModePressed",
+                      gDigiLiveControlDisplayModePressed,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeControlStateDisplayModeUpdateCount",
+                      gDigiLiveControlDisplayModeUpdateCount,
+                      64);
+    AddNumberProperty(properties,
                       "ProbeControlStateEncoderAssignLastNote",
                       gDigiLiveControlEncoderAssignLastNote,
                       32);
@@ -1931,6 +1987,22 @@ PublishDigiLiveControlDiagnostics(uint32_t rawWordBE,
                                  i + 1,
                                  "Pressed",
                                  gDigiLiveControlAboveTransportButtonPressed[i],
+                                 32);
+    }
+    for (uint32_t i = 0; i < kDigiLiveControlTransportSectionButtonCount; ++i) {
+        AddIndexedNumberProperty(properties,
+                                 "ProbeControlStateTransportSectionButton",
+                                 i + 1,
+                                 "Pressed",
+                                 gDigiLiveControlTransportSectionButtonPressed[i],
+                                 32);
+    }
+    for (uint32_t i = 0; i < kDigiLiveControlHardwareMonitorButtonCount; ++i) {
+        AddIndexedNumberProperty(properties,
+                                 "ProbeControlStateHardwareMonitorButton",
+                                 i + 1,
+                                 "Pressed",
+                                 gDigiLiveControlHardwareMonitorButtonPressed[i],
                                  32);
     }
     for (uint32_t i = 0; i < kDigiLiveControlEncoderAssignButtonCount; ++i) {
@@ -2162,6 +2234,27 @@ DecodeDigiLiveRelativeEncoderValue(uint8_t value,
     }
 }
 
+bool
+IsDigiLiveTransportSectionButton(uint32_t noteGroup, uint32_t note)
+{
+    if (noteGroup == kDigiLiveControlGroupNavigation) {
+        return note <= 0x04u || (note >= 0x09u && note <= 0x0du);
+    }
+    if (noteGroup == kDigiLiveControlGroupTransport) {
+        return note <= 0x05u || note == 0x0cu;
+    }
+    return false;
+}
+
+uint32_t
+DigiLiveTransportSectionButtonIndex(uint32_t noteGroup, uint32_t note)
+{
+    uint32_t groupOffset = noteGroup == kDigiLiveControlGroupTransport ?
+        kDigiLiveControlTransportSectionSlotsPerGroup :
+        0u;
+    return groupOffset + (note & 0x0fu);
+}
+
 void
 ObserveDigiLiveMappedControlState(uint32_t portNibble,
                                   uint8_t status,
@@ -2319,6 +2412,35 @@ ObserveDigiLiveMappedControlState(uint32_t portNibble,
             gDigiLiveControlEncoderAssignLastIndex = index;
             gDigiLiveControlEncoderAssignUpdateCount++;
             gDigiLiveControlLastMappedKind = kDigiLiveControlKindEncoderAssignButton;
+            gDigiLiveControlLastMappedChannel = 0xffffffff;
+            mapped = true;
+        } else if (IsDigiLiveTransportSectionButton(noteGroup, data1)) {
+            uint32_t index = DigiLiveTransportSectionButtonIndex(noteGroup, data1);
+            if (index < kDigiLiveControlTransportSectionButtonCount) {
+                gDigiLiveControlTransportSectionButtonPressed[index] = pressed;
+                gDigiLiveControlTransportSectionLastGroup = noteGroup;
+                gDigiLiveControlTransportSectionLastNote = data1;
+                gDigiLiveControlTransportSectionLastIndex = index;
+                gDigiLiveControlTransportSectionUpdateCount++;
+                gDigiLiveControlLastMappedKind = kDigiLiveControlKindTransportSectionButton;
+                gDigiLiveControlLastMappedChannel = 0xffffffff;
+                mapped = true;
+            }
+        } else if (noteGroup == kDigiLiveControlGroupHardwareMonitor &&
+                   data1 < kDigiLiveControlHardwareMonitorButtonCount) {
+            uint32_t index = data1;
+            gDigiLiveControlHardwareMonitorButtonPressed[index] = pressed;
+            gDigiLiveControlHardwareMonitorLastNote = data1;
+            gDigiLiveControlHardwareMonitorLastIndex = index;
+            gDigiLiveControlHardwareMonitorUpdateCount++;
+            gDigiLiveControlLastMappedKind = kDigiLiveControlKindHardwareMonitorButton;
+            gDigiLiveControlLastMappedChannel = 0xffffffff;
+            mapped = true;
+        } else if (noteGroup == kDigiLiveControlDisplayModeGroup &&
+                   data1 == kDigiLiveControlDisplayModeNote) {
+            gDigiLiveControlDisplayModePressed = pressed;
+            gDigiLiveControlDisplayModeUpdateCount++;
+            gDigiLiveControlLastMappedKind = kDigiLiveControlKindDisplayModeButton;
             gDigiLiveControlLastMappedChannel = 0xffffffff;
             mapped = true;
         }
@@ -2650,6 +2772,7 @@ QueueDigiLiveDecodedMidiFeedback(uint32_t portNibble,
         uint8_t noteGroup = static_cast<uint8_t>(data2 & 0x0fu);
         if (noteGroup == kDigiLiveControlGroupAboveTransport ||
             noteGroup == kDigiLiveControlGroupHardwareMonitor ||
+            IsDigiLiveTransportSectionButton(noteGroup, data1) ||
             (noteGroup == kDigiLiveControlDisplayModeGroup &&
              data1 == kDigiLiveControlDisplayModeNote)) {
             gDigiLiveMidiFeedbackSkippedCount++;
@@ -3634,6 +3757,42 @@ PublishAudioRuntimeDiagnostics()
                       gDigiLiveControlAboveTransportUpdateCount,
                       64);
     AddNumberProperty(properties,
+                      "ProbeControlStateTransportSectionLastGroup",
+                      gDigiLiveControlTransportSectionLastGroup,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeControlStateTransportSectionLastNote",
+                      gDigiLiveControlTransportSectionLastNote,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeControlStateTransportSectionLastIndex",
+                      gDigiLiveControlTransportSectionLastIndex,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeControlStateTransportSectionUpdateCount",
+                      gDigiLiveControlTransportSectionUpdateCount,
+                      64);
+    AddNumberProperty(properties,
+                      "ProbeControlStateHardwareMonitorLastNote",
+                      gDigiLiveControlHardwareMonitorLastNote,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeControlStateHardwareMonitorLastIndex",
+                      gDigiLiveControlHardwareMonitorLastIndex,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeControlStateHardwareMonitorUpdateCount",
+                      gDigiLiveControlHardwareMonitorUpdateCount,
+                      64);
+    AddNumberProperty(properties,
+                      "ProbeControlStateDisplayModePressed",
+                      gDigiLiveControlDisplayModePressed,
+                      32);
+    AddNumberProperty(properties,
+                      "ProbeControlStateDisplayModeUpdateCount",
+                      gDigiLiveControlDisplayModeUpdateCount,
+                      64);
+    AddNumberProperty(properties,
                       "ProbeControlStateEncoderAssignLastNote",
                       gDigiLiveControlEncoderAssignLastNote,
                       32);
@@ -3663,6 +3822,22 @@ PublishAudioRuntimeDiagnostics()
                                  i + 1,
                                  "Pressed",
                                  gDigiLiveControlAboveTransportButtonPressed[i],
+                                 32);
+    }
+    for (uint32_t i = 0; i < kDigiLiveControlTransportSectionButtonCount; ++i) {
+        AddIndexedNumberProperty(properties,
+                                 "ProbeControlStateTransportSectionButton",
+                                 i + 1,
+                                 "Pressed",
+                                 gDigiLiveControlTransportSectionButtonPressed[i],
+                                 32);
+    }
+    for (uint32_t i = 0; i < kDigiLiveControlHardwareMonitorButtonCount; ++i) {
+        AddIndexedNumberProperty(properties,
+                                 "ProbeControlStateHardwareMonitorButton",
+                                 i + 1,
+                                 "Pressed",
+                                 gDigiLiveControlHardwareMonitorButtonPressed[i],
                                  32);
     }
     for (uint32_t i = 0; i < kDigiLiveControlEncoderAssignButtonCount; ++i) {
@@ -5440,6 +5615,21 @@ ConfigureAudioDevice(FireWireOHCIProbe * driver)
     gDigiLiveControlAboveTransportLastNote = 0xffffffff;
     gDigiLiveControlAboveTransportLastIndex = 0xffffffff;
     gDigiLiveControlAboveTransportUpdateCount = 0;
+    for (uint32_t i = 0; i < kDigiLiveControlTransportSectionButtonCount; ++i) {
+        gDigiLiveControlTransportSectionButtonPressed[i] = 0;
+    }
+    gDigiLiveControlTransportSectionLastGroup = 0xffffffff;
+    gDigiLiveControlTransportSectionLastNote = 0xffffffff;
+    gDigiLiveControlTransportSectionLastIndex = 0xffffffff;
+    gDigiLiveControlTransportSectionUpdateCount = 0;
+    for (uint32_t i = 0; i < kDigiLiveControlHardwareMonitorButtonCount; ++i) {
+        gDigiLiveControlHardwareMonitorButtonPressed[i] = 0;
+    }
+    gDigiLiveControlHardwareMonitorLastNote = 0xffffffff;
+    gDigiLiveControlHardwareMonitorLastIndex = 0xffffffff;
+    gDigiLiveControlHardwareMonitorUpdateCount = 0;
+    gDigiLiveControlDisplayModePressed = 0;
+    gDigiLiveControlDisplayModeUpdateCount = 0;
     for (uint32_t i = 0; i < kDigiLiveControlEncoderAssignButtonCount; ++i) {
         gDigiLiveControlEncoderAssignButtonPressed[i] = 0;
     }

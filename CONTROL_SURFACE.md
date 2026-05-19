@@ -130,6 +130,8 @@ B0 40..47 3f     = rotary encoder 1..8 counter-clockwise ticks
 90 02 4c/0c     = SAVE
 90 05 4c/0c     = REC ARM
 90 06 4c/0c     = METER
+A MIDI MAP       = no normal port-E control event observed
+B MIDI MAP       = no normal port-E control event observed
 90 00 4d/0d     = FLIP
 90 01 4d/0d     = MASTER FADERS
 90 02 4d/0d     = BANK
@@ -169,20 +171,16 @@ Original driver behavior note:
 - Our current driver maps and echoes them as Digi control messages. A later keyboard bridge should translate their press/release state to macOS modifier down/up events for original-driver parity.
 - The `Above Transport` group (`0C`) is intentionally not echoed back to the console. During the first MIDI Map test, echoed group-`0C` notes briefly moved faders 7 and 8.
 - The hardware monitoring / mic preamp group (`0F`) is also treated as no-echo control state; it is console hardware state, not DAW feedback.
-- `A MIDI MAP` enters the console's internal MIDI mode; the display shows `Midi Mode A:1 Standard midi map` and the console emits separate port-`0` MIDI messages such as `B0 0A xx`. The encoders can be turned in this mode and are expected to belong to the later CoreMIDI-facing path rather than the Pro Tools control-surface mapper.
+- The 0D/0E right-center control blocks are treated as mapped control state, but they are not auto-echoed by the driver.
+- `A MIDI MAP` / `B MIDI MAP` are internal console MIDI-mode controls. They affect the display and can put the surface into a separate MIDI mode, but repeated two-press tests did not emit a normal port-E control-surface button event. In that mode, the console can emit separate port-`0` MIDI messages such as `B0 0A xx`; those belong to the later CoreMIDI-facing path rather than the Pro Tools control-surface mapper.
 
-The remaining printed labels for the Mode/View and Encoder Assignment buttons
-are still being confirmed from the front-panel photo and live two-press tests.
+The core physical button map is now complete except for deeper MIDI-mode
+messages and any DAW-specific display/LED response protocol.
 
 ## Next Probe Order
 
-Probe the remaining blocks left-to-right, top-to-bottom, with enough pause
-between presses to keep the stream readable:
-
-1. left mode/view block
-2. top encoder assignment block
-3. right center control block
-4. bottom soft-key block
-5. each top encoder clockwise/counter-clockwise and press, if the encoder also
-   clicks
-6. LED feedback for every mapped button
+1. Load the `0.2.181` mapping build and confirm 0D/0E/0F buttons no longer increase `ProbeControlStateUnknownMessageCount`.
+2. Probe LED feedback safely by block, avoiding A/B MIDI MAP as generic LED targets.
+3. Add a CoreMIDI-facing endpoint for port-`0` MIDI-mode messages.
+4. Add a HID/modifier bridge for SHIFT, OPT/ALT, CTRL/WIN, and COMMAND/CTRL if Pro Tools does not handle them through its own connector.
+5. Probe display/DAW feedback once the Pro Tools control protocol layer exists.

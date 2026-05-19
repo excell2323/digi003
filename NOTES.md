@@ -2215,6 +2215,41 @@ The monitor labels the confirmed insert/send position switches as `A/F` through
 `E/J`, and labels the rest of the group provisionally as `MODE/VIEW xx` until
 the two-press confirmation pass is complete.
 
+## 0.2.181 Control Surface Block Mapping
+
+Finishes the main physical button mapping pass and moves the remaining right
+center blocks from "unknown" diagnostics into mapped control state:
+
+```text
+90 00 4e/0e = PLUG-IN
+90 01 4e/0e = MIX
+90 02 4e/0e = EDIT
+90 03 4e/0e = LOOP PLAY
+90 04 4e/0e = LOOP REC
+90 05 4e/0e = QUICK PUNCH
+90 0c 4e/0e = MEM LOC
+90 01 4d/0d = MASTER FADERS
+90 00 4d/0d = FLIP
+90 02 4d/0d = BANK
+90 03 4d/0d = NUDGE
+90 04 4d/0d = ZOOM
+90 0b 4d/0d = MIDI RECALL
+90 0a 4d/0d = MIDI EDIT
+90 09 4d/0d = UTILITY
+90 0c 4d/0d = FADER MUTE
+90 0d 4d/0d = FOCUS
+90 06 4c/0c = METER
+```
+
+The build adds driver diagnostics for the 0D/0E transport-section block, the
+0F hardware-monitor block, and DISPLAY MODE. It also suppresses automatic
+decoded-note feedback for 0D/0E, matching the existing guard for 0C/0F, so these
+console function buttons do not get echoed back as generic LED commands.
+
+Repeated two-press tests for `A MIDI MAP` and `B MIDI MAP` produced no normal
+port-`E` control-surface event. Treat them as internal MIDI-mode selectors. The
+MIDI-mode stream itself remains later CoreMIDI endpoint work.
+
 ## Async Control Reference
 
 The Rust `firewire-digi00x-protocols` crate is supplemental runtime code for internal functions outside the isochronous packet stream. It is useful for later mixer/control-surface work, but it does not solve the current live RX harvest issue.

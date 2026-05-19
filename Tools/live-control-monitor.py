@@ -262,6 +262,13 @@ def state_summary(text):
         "mode_updates": parse_number(text, "ProbeControlStateModeViewUpdateCount"),
         "assign_last": parse_number(text, "ProbeControlStateEncoderAssignLastIndex", 0xFFFFFFFF),
         "assign_updates": parse_number(text, "ProbeControlStateEncoderAssignUpdateCount"),
+        "transport_section_group": parse_number(text, "ProbeControlStateTransportSectionLastGroup", 0xFFFFFFFF),
+        "transport_section_note": parse_number(text, "ProbeControlStateTransportSectionLastNote", 0xFFFFFFFF),
+        "transport_section_updates": parse_number(text, "ProbeControlStateTransportSectionUpdateCount"),
+        "hardware_note": parse_number(text, "ProbeControlStateHardwareMonitorLastNote", 0xFFFFFFFF),
+        "hardware_updates": parse_number(text, "ProbeControlStateHardwareMonitorUpdateCount"),
+        "display_mode": parse_number(text, "ProbeControlStateDisplayModePressed"),
+        "display_updates": parse_number(text, "ProbeControlStateDisplayModeUpdateCount"),
         "encoder_last": parse_number(text, "ProbeControlStateRotaryEncoderLastIndex", 0xFFFFFFFF),
         "last_channel": parse_number(text, "ProbeControlStateLastMappedChannel", 0xFFFFFFFF),
         "mapped": parse_number(text, "ProbeControlStateMappedMessageCount"),
@@ -295,6 +302,11 @@ def state_summary(text):
     mode_last_text = "-" if values["mode_last"] == 0xFFFFFFFF else str(values["mode_last"] + 1)
     assign_last_text = "-" if values["assign_last"] == 0xFFFFFFFF else str(values["assign_last"] + 1)
     encoder_last_text = "-" if values["encoder_last"] == 0xFFFFFFFF else str(values["encoder_last"] + 1)
+    tsec_group = values["transport_section_group"]
+    tsec_note = values["transport_section_note"]
+    tsec_text = "-" if tsec_group == 0xFFFFFFFF else f"{tsec_group:X}:{tsec_note:02X}"
+    hardware_note = values["hardware_note"]
+    hardware_text = "-" if hardware_note == 0xFFFFFFFF else f"{hardware_note:02X}"
     return (
         f"state sel1={values['sel1']} f1touch={values['f1touch']} "
         f"f1cc=0x{values['f1cc']:02X} f1val={values['f1val']} "
@@ -306,6 +318,9 @@ def state_summary(text):
         f"{values['jog_updates']} shuttle={values['shuttle_value']}/"
         f"{values['shuttle_updates']} mode={mode_last_text}/{values['mode_updates']} "
         f"assign={assign_last_text}/{values['assign_updates']} "
+        f"tsec={tsec_text}/{values['transport_section_updates']} "
+        f"hw={hardware_text}/{values['hardware_updates']} "
+        f"display={values['display_mode']}/{values['display_updates']} "
         f"enc_last={encoder_last_text} "
         f"last_ch={last_channel_text} mapped={values['mapped']} unknown={values['unknown']} "
         f"feedback={values['feedback']} drops={values['drops']} "
