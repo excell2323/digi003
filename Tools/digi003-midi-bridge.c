@@ -26,6 +26,15 @@ enum {
     kDigi003DisplayClassUnknown = 0,
     kDigi003DisplayClassValue = 1,
     kDigi003DisplayClassName = 2,
+    kDigi003SysexDecisionForward = 0,
+    kDigi003SysexDecisionThrottled = 1,
+    kDigi003SysexDecisionBlockedVControlMeter = 2,
+    kChannelStripFeedbackTrackedNotes = 2,
+    kChannelStripFeedbackChannels = 8,
+    kReleaseEchoSuppressWindowNs = 750000000ull,
+    kReleaseLedRelatchDelayNs = 25000000ull,
+    kLedStateSyncDelayNs = 50000000ull,
+    kStartupLedHoldNs = 250000000ull,
 };
 
 static const char *kDefaultPortName = "Avid 003 Port 3 (Control)";
@@ -43,6 +52,23 @@ static uint64_t g_sysex_line_last_forward_ns[kSysexThrottleLineCount] = {0};
 static UInt16 g_sysex_line_last_length[kSysexThrottleLineCount] = {0};
 static uint8_t g_sysex_line_last_payload[kSysexThrottleLineCount][kSysexPayloadRememberBytes] = {{0}};
 static uint8_t g_sysex_line_last_class[kSysexThrottleLineCount] = {0};
+static uint64_t g_blocked_vcontrol_meter_sysex_count = 0;
+static uint8_t g_blocked_vcontrol_meter_last_address = 0;
+static uint8_t g_blocked_vcontrol_meter_last_value = 0;
+static uint64_t g_physical_button_press_ns[kChannelStripFeedbackTrackedNotes][kChannelStripFeedbackChannels] = {{0}};
+static uint64_t g_physical_button_release_ns[kChannelStripFeedbackTrackedNotes][kChannelStripFeedbackChannels] = {{0}};
+static uint64_t g_physical_button_last_press_ns[kChannelStripFeedbackTrackedNotes] = {0};
+static uint8_t g_physical_button_last_press_channel[kChannelStripFeedbackTrackedNotes] = {0};
+static uint64_t g_feedback_button_on_ns[kChannelStripFeedbackTrackedNotes][kChannelStripFeedbackChannels] = {{0}};
+static bool g_feedback_button_active[kChannelStripFeedbackTrackedNotes][kChannelStripFeedbackChannels] = {{false}};
+static uint64_t g_pending_release_relatched_led_ns[kChannelStripFeedbackTrackedNotes][kChannelStripFeedbackChannels] = {{0}};
+static uint64_t g_suppressed_release_echo_count = 0;
+static uint64_t g_relatched_release_led_count = 0;
+static uint64_t g_startup_clear_led_count = 0;
+static uint64_t g_pending_led_state_sync_ns = 0;
+static uint64_t g_led_state_sync_count = 0;
+static uint64_t g_startup_led_hold_until_ns = 0;
+static uint64_t g_startup_led_held_feedback_count = 0;
 
 static void handle_signal(int signo)
 {
@@ -184,6 +210,19 @@ static bool is_digi003_display_sysex(const uint8_t *bytes, UInt16 length, uint8_
     return true;
 }
 
+static bool is_vcontrol_meter_sysex(const uint8_t *bytes, UInt16 length)
+{
+    if (bytes == NULL || length != 7) {
+        return false;
+    }
+
+    return bytes[0] == 0xf0u &&
+           bytes[1] == 0x13u &&
+           bytes[2] == 0x01u &&
+           bytes[3] == 0x00u &&
+           bytes[6] == 0xf7u;
+}
+
 static bool ascii_digit(uint8_t value)
 {
     return value >= '0' && value <= '9';
@@ -247,15 +286,22 @@ static bool is_digi003_transport_counter_sysex(const uint8_t *bytes, UInt16 leng
     return false;
 }
 
-static bool should_forward_sysex_to_driver(const uint8_t *bytes, UInt16 length)
+static uint8_t classify_sysex_forward_decision(const uint8_t *bytes, UInt16 length)
 {
+    if (is_vcontrol_meter_sysex(bytes, length)) {
+        g_blocked_vcontrol_meter_sysex_count++;
+        g_blocked_vcontrol_meter_last_address = bytes[4];
+        g_blocked_vcontrol_meter_last_value = bytes[5];
+        return kDigi003SysexDecisionBlockedVControlMeter;
+    }
+
     uint8_t line = 0;
     if (!is_digi003_display_sysex(bytes, length, &line)) {
-        return true;
+        return kDigi003SysexDecisionForward;
     }
 
     if (is_digi003_transport_counter_sysex(bytes, length, line)) {
-        return false;
+        return kDigi003SysexDecisionThrottled;
     }
 
     UInt16 remembered = length < kSysexPayloadRememberBytes ? length : kSysexPayloadRememberBytes;
@@ -278,7 +324,7 @@ static bool should_forward_sysex_to_driver(const uint8_t *bytes, UInt16 length)
     if (now != 0 && last != 0) {
         uint64_t age = now - last;
         if (age < min_interval_ns || (duplicate && age < 250000000ull)) {
-            return false;
+            return kDigi003SysexDecisionThrottled;
         }
     }
 
@@ -286,7 +332,7 @@ static bool should_forward_sysex_to_driver(const uint8_t *bytes, UInt16 length)
     g_sysex_line_last_length[line] = remembered;
     g_sysex_line_last_class[line] = payload_class;
     memcpy(g_sysex_line_last_payload[line], bytes, remembered);
-    return true;
+    return kDigi003SysexDecisionForward;
 }
 
 static bool should_forward_short_message_to_driver(uint8_t status, uint8_t data1, uint8_t data2)
@@ -322,6 +368,178 @@ static bool should_forward_short_message_to_driver(uint8_t status, uint8_t data1
     g_fader_feedback_last_value[channel] = data2;
     g_fader_feedback_last_forward_ns[channel] = now;
     return true;
+}
+
+static bool is_tracked_channel_strip_button(uint8_t status, uint8_t data1, uint8_t data2, uint8_t *channel)
+{
+    uint8_t command = status & 0xf0u;
+    if ((command != 0x80u && command != 0x90u) ||
+        data1 >= kChannelStripFeedbackTrackedNotes) {
+        return false;
+    }
+
+    uint8_t note_group = data2 & 0x0fu;
+    if (note_group >= kChannelStripFeedbackChannels) {
+        return false;
+    }
+
+    if (channel != NULL) {
+        *channel = data2 & 0x07u;
+    }
+    return true;
+}
+
+static uint8_t channel_strip_led_data2(uint8_t note, uint8_t channel, bool active)
+{
+    uint8_t active_mask = note == 0x01u ? 0x60u : 0x20u;
+    return active ? (uint8_t)(active_mask | (channel & 0x07u)) : (uint8_t)(channel & 0x07u);
+}
+
+static void observe_physical_message_to_coremidi(uint8_t status, uint8_t data1, uint8_t data2)
+{
+    uint8_t channel = 0;
+    if (!is_tracked_channel_strip_button(status, data1, data2, &channel)) {
+        return;
+    }
+
+    uint64_t now = monotonic_ns();
+    if (now == 0) {
+        return;
+    }
+
+    bool pressed = (data2 & 0x40u) != 0;
+    if (pressed) {
+        g_physical_button_press_ns[data1][channel] = now;
+        g_physical_button_last_press_ns[data1] = now;
+        g_physical_button_last_press_channel[data1] = channel;
+    } else {
+        g_physical_button_release_ns[data1][channel] = now;
+        if (g_feedback_button_active[data1][channel] &&
+            g_feedback_button_on_ns[data1][channel] >= g_physical_button_press_ns[data1][channel]) {
+            g_pending_release_relatched_led_ns[data1][channel] = now + kReleaseLedRelatchDelayNs;
+        }
+    }
+}
+
+static void schedule_led_state_sync(uint64_t now)
+{
+    if (now != 0) {
+        uint64_t due = now + kLedStateSyncDelayNs;
+        if (g_startup_led_hold_until_ns > now && due < g_startup_led_hold_until_ns) {
+            due = g_startup_led_hold_until_ns;
+        }
+        g_pending_led_state_sync_ns = due;
+    }
+}
+
+static bool should_hold_startup_led_feedback(uint8_t status, uint8_t data1, uint8_t data2)
+{
+    if (g_startup_led_hold_until_ns == 0) {
+        return false;
+    }
+
+    uint64_t now = monotonic_ns();
+    if (now == 0 || now >= g_startup_led_hold_until_ns) {
+        return false;
+    }
+
+    if (!is_tracked_channel_strip_button(status, data1, data2, NULL)) {
+        return false;
+    }
+
+    g_startup_led_held_feedback_count++;
+    if (g_feedback_log != NULL) {
+        fprintf(g_feedback_log,
+                "startup hold: held %02x %02x %02x (count=%llu)\n",
+                status,
+                data1,
+                data2,
+                (unsigned long long)g_startup_led_held_feedback_count);
+        fflush(g_feedback_log);
+    }
+    return true;
+}
+
+static bool should_suppress_release_echo(uint8_t status, uint8_t data1, uint8_t data2)
+{
+    uint8_t channel = 0;
+    if (!is_tracked_channel_strip_button(status, data1, data2, &channel)) {
+        return false;
+    }
+
+    uint8_t command = status & 0xf0u;
+    bool active = command == 0x90u && (data2 & 0x60u) != 0;
+    uint64_t now = monotonic_ns();
+    if (now == 0) {
+        return false;
+    }
+
+    if (active) {
+        g_feedback_button_on_ns[data1][channel] = now;
+        g_feedback_button_active[data1][channel] = true;
+        schedule_led_state_sync(now);
+        uint64_t release_ns = g_physical_button_release_ns[data1][channel];
+        uint64_t press_ns = g_physical_button_press_ns[data1][channel];
+        if (press_ns != 0 &&
+            release_ns >= press_ns &&
+            now >= release_ns &&
+            now - release_ns <= kReleaseEchoSuppressWindowNs) {
+            g_pending_release_relatched_led_ns[data1][channel] = now + kReleaseLedRelatchDelayNs;
+        }
+        return false;
+    }
+
+    uint64_t release_ns = g_physical_button_release_ns[data1][channel];
+    uint64_t press_ns = g_physical_button_press_ns[data1][channel];
+    uint64_t feedback_on_ns = g_feedback_button_on_ns[data1][channel];
+    uint64_t last_press_ns = g_physical_button_last_press_ns[data1];
+    bool newer_different_press =
+        last_press_ns > press_ns &&
+        g_physical_button_last_press_channel[data1] != channel;
+    if (release_ns != 0 &&
+        now >= release_ns &&
+        now - release_ns <= kReleaseEchoSuppressWindowNs &&
+        feedback_on_ns >= press_ns &&
+        feedback_on_ns <= now &&
+        !newer_different_press) {
+        g_suppressed_release_echo_count++;
+        if (g_feedback_log != NULL) {
+            fprintf(g_feedback_log,
+                    "release echo suppressed: %02x %02x %02x (count=%llu)\n",
+                    status,
+                    data1,
+                    data2,
+                    (unsigned long long)g_suppressed_release_echo_count);
+            fflush(g_feedback_log);
+        }
+        return true;
+    }
+
+    g_feedback_button_active[data1][channel] = false;
+    g_pending_release_relatched_led_ns[data1][channel] = 0;
+    schedule_led_state_sync(now);
+    return false;
+}
+
+static void translate_short_feedback_for_driver(uint8_t status,
+                                                uint8_t data1,
+                                                uint8_t data2,
+                                                uint8_t *out_status,
+                                                uint8_t *out_data1,
+                                                uint8_t *out_data2)
+{
+    *out_status = status;
+    *out_data1 = data1;
+    *out_data2 = data2;
+
+    uint8_t command = status & 0xf0u;
+    if ((command != 0x80u && command != 0x90u) || data1 > 0x01u) {
+        return;
+    }
+
+    bool active = command == 0x90u && (data2 & 0x60u) != 0;
+    *out_status = 0x90u;
+    *out_data2 = channel_strip_led_data2(data1, data2 & 0x07u, active);
 }
 
 static void send_coremidi_message(MIDIEndpointRef source, uint8_t status, uint8_t data1, uint8_t data2)
@@ -453,6 +671,114 @@ static kern_return_t send_debug_midi_bytes(uint32_t port, const uint8_t *bytes, 
     return KERN_SUCCESS;
 }
 
+static void service_pending_release_led_relatches(void)
+{
+    uint64_t now = monotonic_ns();
+    if (now == 0) {
+        return;
+    }
+
+    for (uint8_t note = 0; note < kChannelStripFeedbackTrackedNotes; ++note) {
+        for (uint8_t channel = 0; channel < kChannelStripFeedbackChannels; ++channel) {
+            uint64_t due = g_pending_release_relatched_led_ns[note][channel];
+            if (due == 0 || now < due) {
+                continue;
+            }
+
+            g_pending_release_relatched_led_ns[note][channel] = 0;
+            if (!g_feedback_button_active[note][channel]) {
+                continue;
+            }
+
+            uint8_t data2 = channel_strip_led_data2(note, channel, true);
+            kern_return_t ret = send_debug_midi(kControlPort, 0x90u, note, data2);
+            if (ret == KERN_SUCCESS) {
+                g_relatched_release_led_count++;
+            }
+            if (g_feedback_log != NULL) {
+                fprintf(g_feedback_log,
+                        "release relatch: 90 %02x %02x ret=0x%08x (count=%llu)\n",
+                        note,
+                        data2,
+                        ret,
+                        (unsigned long long)g_relatched_release_led_count);
+                fflush(g_feedback_log);
+            }
+            if (g_verbose) {
+                printf("release relatch: 90 %02x %02x ret=0x%08x (count=%llu)\n",
+                       note,
+                       data2,
+                       ret,
+                       (unsigned long long)g_relatched_release_led_count);
+                fflush(stdout);
+            }
+        }
+    }
+}
+
+static void service_led_state_sync(void)
+{
+    uint64_t now = monotonic_ns();
+    if (now == 0 || g_pending_led_state_sync_ns == 0 || now < g_pending_led_state_sync_ns) {
+        return;
+    }
+
+    g_pending_led_state_sync_ns = 0;
+    for (uint8_t note = 0; note < kChannelStripFeedbackTrackedNotes; ++note) {
+        for (uint8_t channel = 0; channel < kChannelStripFeedbackChannels; ++channel) {
+            bool active = g_feedback_button_active[note][channel];
+            uint8_t data2 = channel_strip_led_data2(note, channel, active);
+            kern_return_t ret = send_debug_midi(kControlPort, 0x90u, note, data2);
+            if (ret != KERN_SUCCESS && g_verbose) {
+                printf("led state sync: 90 %02x %02x ret=0x%08x\n", note, data2, ret);
+                fflush(stdout);
+            }
+        }
+    }
+
+    g_led_state_sync_count++;
+    if (g_feedback_log != NULL) {
+        fprintf(g_feedback_log,
+                "led state sync: wrote select/solo snapshot (count=%llu)\n",
+                (unsigned long long)g_led_state_sync_count);
+        fflush(g_feedback_log);
+    }
+}
+
+static void clear_channel_strip_leds_on_startup(void)
+{
+    if (!g_forward_feedback_to_driver) {
+        return;
+    }
+
+    uint64_t now = monotonic_ns();
+    if (now != 0) {
+        g_startup_led_hold_until_ns = now + kStartupLedHoldNs;
+    }
+
+    for (uint8_t note = 0; note < kChannelStripFeedbackTrackedNotes; ++note) {
+        for (uint8_t channel = 0; channel < kChannelStripFeedbackChannels; ++channel) {
+            g_feedback_button_active[note][channel] = false;
+            g_feedback_button_on_ns[note][channel] = 0;
+            g_pending_release_relatched_led_ns[note][channel] = 0;
+
+            kern_return_t ret =
+                send_debug_midi(kControlPort, 0x90u, note, channel_strip_led_data2(note, channel, false));
+            if (ret == KERN_SUCCESS) {
+                g_startup_clear_led_count++;
+            }
+        }
+    }
+
+    if (g_feedback_log != NULL) {
+        fprintf(g_feedback_log,
+                "startup clear: cleared %llu select/solo LED frames\n",
+                (unsigned long long)g_startup_clear_led_count);
+        fflush(g_feedback_log);
+    }
+    schedule_led_state_sync(now);
+}
+
 static int midi_message_length(uint8_t status)
 {
     uint8_t command = status & 0xf0u;
@@ -480,7 +806,8 @@ static void midi_read_proc(const MIDIPacketList *packet_list, void *read_proc_re
         }
 
         if (packet->length > 0 && packet->data[0] == 0xf0u) {
-            if (should_forward_sysex_to_driver(packet->data, packet->length)) {
+            uint8_t decision = classify_sysex_forward_decision(packet->data, packet->length);
+            if (decision == kDigi003SysexDecisionForward) {
                 kern_return_t ret = send_debug_midi_bytes(kControlPort, packet->data, packet->length);
                 if (g_verbose) {
                     printf("from CoreMIDI sysex len=%u -> driver ret=0x%08x%s\n",
@@ -497,6 +824,14 @@ static void midi_read_proc(const MIDIPacketList *packet_list, void *read_proc_re
                             ret,
                             mach_error_string(ret));
                 }
+            } else if (g_verbose && decision == kDigi003SysexDecisionBlockedVControlMeter) {
+                printf("from CoreMIDI sysex len=%u -> driver blocked v-control meter-like frame "
+                       "(count=%llu last=%02x/%02x)\n",
+                       packet->length,
+                       (unsigned long long)g_blocked_vcontrol_meter_sysex_count,
+                       g_blocked_vcontrol_meter_last_address,
+                       g_blocked_vcontrol_meter_last_value);
+                fflush(stdout);
             } else if (g_verbose) {
                 printf("from CoreMIDI sysex len=%u -> driver throttled\n", packet->length);
                 fflush(stdout);
@@ -545,12 +880,42 @@ static void midi_read_proc(const MIDIPacketList *packet_list, void *read_proc_re
                 continue;
             }
 
-            kern_return_t ret = send_debug_midi(kControlPort, status, data1, data2);
+            if (should_suppress_release_echo(status, data1, data2)) {
+                if (g_verbose) {
+                    printf("from CoreMIDI msg: %02x %02x %02x -> driver suppressed release echo "
+                           "(count=%llu)\n",
+                           status,
+                           data1,
+                           data2,
+                           (unsigned long long)g_suppressed_release_echo_count);
+                    fflush(stdout);
+                }
+                continue;
+            }
+
+            if (should_hold_startup_led_feedback(status, data1, data2)) {
+                continue;
+            }
+
+            uint8_t driver_status = status;
+            uint8_t driver_data1 = data1;
+            uint8_t driver_data2 = data2;
+            translate_short_feedback_for_driver(status,
+                                                data1,
+                                                data2,
+                                                &driver_status,
+                                                &driver_data1,
+                                                &driver_data2);
+
+            kern_return_t ret = send_debug_midi(kControlPort, driver_status, driver_data1, driver_data2);
             if (g_verbose) {
-                printf("from CoreMIDI msg: %02x %02x %02x -> driver ret=0x%08x%s\n",
+                printf("from CoreMIDI msg: %02x %02x %02x -> driver %02x %02x %02x ret=0x%08x%s\n",
                        status,
                        data1,
                        data2,
+                       driver_status,
+                       driver_data1,
+                       driver_data2,
                        ret,
                        g_forward_feedback_to_driver ? "" : " (disabled)");
                 fflush(stdout);
@@ -671,6 +1036,7 @@ int main(int argc, char **argv)
     printf("bridge: created CoreMIDI source/destination \"%s\"\n", port_name);
     printf("bridge: forwarding Digi 003 port-E control messages to V-Control/Pro Tools\n");
     fflush(stdout);
+    clear_channel_strip_leds_on_startup();
 
     while (!g_should_stop) {
         decoded_count = 0;
@@ -728,12 +1094,15 @@ int main(int argc, char **argv)
                 uint8_t data1 = (message >> 8) & 0xffu;
                 uint8_t data2 = message & 0xffu;
                 if (port == kControlPort) {
+                    observe_physical_message_to_coremidi(status, data1, data2);
                     send_coremidi_message(source, status, data1, data2);
                 }
             }
             last_count = decoded_count;
         }
 
+        service_pending_release_led_relatches();
+        service_led_state_sync();
         usleep(poll_ms * 1000u);
     }
 
@@ -745,6 +1114,32 @@ int main(int argc, char **argv)
         fclose(g_feedback_log);
     }
     IOObjectRelease(g_probe_service);
+    if (g_blocked_vcontrol_meter_sysex_count != 0) {
+        printf("bridge: blocked %llu v-control meter-like sysex frames; last=%02x/%02x\n",
+               (unsigned long long)g_blocked_vcontrol_meter_sysex_count,
+               g_blocked_vcontrol_meter_last_address,
+               g_blocked_vcontrol_meter_last_value);
+    }
+    if (g_suppressed_release_echo_count != 0) {
+        printf("bridge: suppressed %llu channel-strip release echo frames\n",
+               (unsigned long long)g_suppressed_release_echo_count);
+    }
+    if (g_relatched_release_led_count != 0) {
+        printf("bridge: relatched %llu channel-strip LEDs after physical release\n",
+               (unsigned long long)g_relatched_release_led_count);
+    }
+    if (g_startup_clear_led_count != 0) {
+        printf("bridge: cleared %llu select/solo LED frames on startup\n",
+               (unsigned long long)g_startup_clear_led_count);
+    }
+    if (g_led_state_sync_count != 0) {
+        printf("bridge: wrote %llu select/solo LED state sync snapshots\n",
+               (unsigned long long)g_led_state_sync_count);
+    }
+    if (g_startup_led_held_feedback_count != 0) {
+        printf("bridge: held %llu select/solo feedback frames during startup\n",
+               (unsigned long long)g_startup_led_held_feedback_count);
+    }
     printf("bridge: stopped\n");
     return 0;
 }

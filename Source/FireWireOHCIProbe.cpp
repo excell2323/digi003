@@ -2915,6 +2915,11 @@ QueueDigiLiveDecodedMidiFeedback(uint32_t portNibble,
     }
     if (command == 0x80u || command == 0x90u) {
         uint8_t noteGroup = static_cast<uint8_t>(data2 & 0x0fu);
+        if (data1 <= kDigiLiveControlNoteChannelSolo &&
+            noteGroup < kDigiLiveControlChannelStripCount) {
+            gDigiLiveMidiFeedbackSkippedCount++;
+            return false;
+        }
         if (IsDigiLiveNavigationModeLedButton(noteGroup, data1)) {
             bool active = (data2 & 0x60u) != 0;
             if (active) {
