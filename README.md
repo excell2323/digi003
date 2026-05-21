@@ -106,6 +106,7 @@ Build the driver, host app, and MIDI bridge:
 ```sh
 ./scripts/build-tools.sh
 ./scripts/build-host-app.sh
+./scripts/build-midi-bridge-app.sh
 ```
 
 Ad-hoc signing only proves that the bundle can be sealed locally. It is not
@@ -122,6 +123,14 @@ and provisioning profiles:
 SIGN_IDENTITY='Apple Development: Your Name (TEAMID)' ./scripts/sign-with-identity.sh
 ./scripts/install-host-app.sh
 /Applications/FireWireOHCIProbeLoader.app/Contents/MacOS/FireWireOHCIProbeLoader
+```
+
+After Apple grants `com.apple.developer.driverkit.userclient-access` for the
+bridge app ID, sign and install the bundled MIDI bridge app:
+
+```sh
+SIGN_IDENTITY='Apple Development: Your Name (TEAMID)' ./scripts/sign-midi-bridge-app.sh
+./scripts/install-midi-bridge-app.sh
 ```
 
 If macOS asks for approval, approve the extension in System Settings, then
@@ -154,6 +163,10 @@ Stop it with:
 ```sh
 ./scripts/stop-midi-bridge.sh
 ```
+
+If `/Applications/Digi003MIDIBridge.app` is installed, the launch agent uses
+that signed bundle. Otherwise it falls back to the local development binary in
+`Tools/bin`.
 
 For the current V-Control/HUI setup:
 

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+ "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>application-identifier</key>
+    <string>7H3ND356AV.com.axelheckert.Digi003MIDIBridge</string>
+    <key>com.apple.application-identifier</key>
+    <string>7H3ND356AV.com.axelheckert.Digi003MIDIBridge</string>
+    <key>com.apple.developer.driverkit.userclient-access</key>
+    <array>
+        <string>com.axelheckert.driver.FireWireOHCIProbe</string>
+    </array>
+    <key>com.apple.developer.team-identifier</key>
+    <string>7H3ND356AV</string>
+    <key>keychain-access-groups</key>
+    <array>
+        <string>7H3ND356AV.*</string>
+    </array>
+</dict>
+</plist>

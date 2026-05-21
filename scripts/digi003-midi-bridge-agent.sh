@@ -2,7 +2,9 @@
 set -eu
 
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-BRIDGE="$PROJECT_DIR/Tools/bin/digi003-midi-bridge"
+DEFAULT_BRIDGE="$PROJECT_DIR/Tools/bin/digi003-midi-bridge"
+INSTALLED_BRIDGE_APP="/Applications/Digi003MIDIBridge.app/Contents/MacOS/Digi003MIDIBridge"
+BRIDGE="${BRIDGE:-}"
 LOG_DIR="${LOG_DIR:-$HOME/Library/Logs/FireWireOHCIProbe}"
 POLL_MS="${POLL_MS:-5}"
 FEEDBACK_TO_DRIVER="${FEEDBACK_TO_DRIVER:-1}"
@@ -41,11 +43,21 @@ wait_for_vcontrol() {
 }
 
 if [ ! -x "$BRIDGE" ]; then
+    if [ -x "$INSTALLED_BRIDGE_APP" ]; then
+        BRIDGE="$INSTALLED_BRIDGE_APP"
+    else
+        BRIDGE="$DEFAULT_BRIDGE"
+    fi
+fi
+
+if [ ! -x "$BRIDGE" ]; then
     "$PROJECT_DIR/scripts/build-tools.sh"
+    BRIDGE="$DEFAULT_BRIDGE"
 fi
 mkdir -p "$LOG_DIR"
 
 log "agent started"
+log "using MIDI bridge binary: $BRIDGE"
 while true; do
     wait_for_driver
     wait_for_vcontrol

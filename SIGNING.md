@@ -124,9 +124,42 @@ Local development builds currently use `allow-any-userclient-access` on the
 DEXT so the CoreMIDI bridge can pass V-Control/Pro Tools feedback back to the
 driver while the app-scoped entitlement request is pending.
 
+## MIDI Bridge App
+
+For public distribution, the loose command-line MIDI bridge should be shipped
+inside a signed app/helper bundle:
+
+```text
+com.axelheckert.Digi003MIDIBridge
+```
+
+The bridge app needs:
+
+```xml
+com.apple.developer.driverkit.userclient-access
+```
+
+scoped to:
+
+```text
+com.axelheckert.driver.FireWireOHCIProbe
+```
+
+The project now has a bundle scaffold and scripts for that path:
+
+```sh
+./scripts/build-midi-bridge-app.sh
+SIGN_IDENTITY='Apple Development: Your Name (TEAMID)' ./scripts/sign-midi-bridge-app.sh
+./scripts/install-midi-bridge-app.sh
+```
+
+`sign-midi-bridge-app.sh` intentionally fails until a provisioning profile for
+`7H3ND356AV.com.axelheckert.Digi003MIDIBridge` includes
+`com.apple.developer.driverkit.userclient-access`.
+
 ## Public Distribution Requirements
 
-The current `0.2.194/394` beta is signed as a local development build. That is
+The current `0.2.194/397` beta is signed as a local development build. That is
 enough for the development machine that owns the certificate and provisioning
 profiles, but it is not a normal public release path.
 

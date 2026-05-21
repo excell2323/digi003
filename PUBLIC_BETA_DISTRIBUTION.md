@@ -11,6 +11,18 @@ and close testing, but it is not a normal public binary distribution until
 Apple grants distribution-capable DriverKit entitlements and the app/driver are
 Developer-ID signed and notarized.
 
+Requested in Apple Developer on 2026-05-21:
+
+```text
+com.axelheckert.driver.FireWireOHCIProbe:
+- DriverKit Family Audio
+- DriverKit PCI (PrimaryMatch)
+
+com.axelheckert.Digi003MIDIBridge:
+- DriverKit UserClient Access
+  -> com.axelheckert.driver.FireWireOHCIProbe
+```
+
 Apple references:
 
 - https://developer.apple.com/system-extensions/
@@ -37,6 +49,16 @@ com.axelheckert.Digi003MIDIBridge
 The current command-line MIDI bridge works for local development. Before a
 polished public beta, package it as a signed helper/app so its user-client
 access entitlement is scoped and auditable.
+
+Project scaffold now exists:
+
+```text
+BridgeApp/Info.plist
+BridgeApp/Digi003MIDIBridge.entitlements
+scripts/build-midi-bridge-app.sh
+scripts/sign-midi-bridge-app.sh
+scripts/install-midi-bridge-app.sh
+```
 
 ## Entitlements To Request
 
@@ -173,4 +195,3 @@ Known beta limitations:
 - Control-surface mapping is still beta
 - 44.1 kHz and 48 kHz are the currently supported sample rates
 ```
-
