@@ -2,6 +2,7 @@
 #include <CoreMIDI/CoreMIDI.h>
 #include <IOKit/IOKitLib.h>
 #include <mach/mach_error.h>
+#include <pthread.h>
 #include <signal.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -19,6 +20,8 @@ enum {
     kMaxRawMidiBytesPerCall = 512,
     kDecodedRecentCapacity = 256,
     kFaderFeedbackChannelCount = 8,
+    kDriverFeedbackQueueCapacity = 1024,
+    kDriverFeedbackQueueDrainPerPoll = 64,
     kSysexThrottleLineCount = 256,
     kSysexPayloadRememberBytes = 32,
     kDigi003DisplayPayloadOffset = 7,
@@ -36,6 +39,15 @@ enum {
     kLedStateSyncDelayNs = 50000000ull,
     kStartupLedHoldNs = 250000000ull,
 };
+
+typedef struct {
+    uint8_t kind;
+    uint8_t status;
+    uint8_t data1;
+    uint8_t data2;
+    UInt16 length;
+    uint8_t bytes[kMaxRawMidiBytesPerCall];
+} QueuedDriverFeedback;
 
 static const char *kDefaultPortName = "Avid 003 Port 3 (Control)";
 
@@ -69,6 +81,16 @@ static uint64_t g_pending_led_state_sync_ns = 0;
 static uint64_t g_led_state_sync_count = 0;
 static uint64_t g_startup_led_hold_until_ns = 0;
 static uint64_t g_startup_led_held_feedback_count = 0;
+static pthread_mutex_t g_driver_feedback_queue_lock = PTHREAD_MUTEX_INITIALIZER;
+static QueuedDriverFeedback g_driver_feedback_queue[kDriverFeedbackQueueCapacity];
+static uint32_t g_driver_feedback_queue_read_index = 0;
+static uint32_t g_driver_feedback_queue_write_index = 0;
+static uint32_t g_driver_feedback_queue_count = 0;
+static uint64_t g_driver_feedback_queue_enqueued_count = 0;
+static uint64_t g_driver_feedback_queue_sent_count = 0;
+static uint64_t g_driver_feedback_queue_drop_count = 0;
+static uint64_t g_driver_feedback_queue_busy_drop_count = 0;
+static uint64_t g_driver_feedback_queue_error_count = 0;
 
 static void handle_signal(int signo)
 {
@@ -671,6 +693,123 @@ static kern_return_t send_debug_midi_bytes(uint32_t port, const uint8_t *bytes, 
     return KERN_SUCCESS;
 }
 
+static bool enqueue_driver_feedback_short(uint8_t status, uint8_t data1, uint8_t data2)
+{
+    if (!g_forward_feedback_to_driver) {
+        return true;
+    }
+
+    if (pthread_mutex_trylock(&g_driver_feedback_queue_lock) != 0) {
+        g_driver_feedback_queue_busy_drop_count++;
+        return false;
+    }
+
+    if (g_driver_feedback_queue_count >= kDriverFeedbackQueueCapacity) {
+        g_driver_feedback_queue_drop_count++;
+        pthread_mutex_unlock(&g_driver_feedback_queue_lock);
+        return false;
+    }
+
+    QueuedDriverFeedback *item = &g_driver_feedback_queue[g_driver_feedback_queue_write_index];
+    item->kind = 1;
+    item->status = status;
+    item->data1 = data1;
+    item->data2 = data2;
+    item->length = 0;
+    g_driver_feedback_queue_write_index =
+        (g_driver_feedback_queue_write_index + 1) % kDriverFeedbackQueueCapacity;
+    g_driver_feedback_queue_count++;
+    g_driver_feedback_queue_enqueued_count++;
+    pthread_mutex_unlock(&g_driver_feedback_queue_lock);
+    return true;
+}
+
+static bool enqueue_driver_feedback_bytes(const uint8_t *bytes, UInt16 length)
+{
+    if (!g_forward_feedback_to_driver) {
+        return true;
+    }
+    if (bytes == NULL || length == 0 || length > kMaxRawMidiBytesPerCall) {
+        g_driver_feedback_queue_drop_count++;
+        return false;
+    }
+
+    if (pthread_mutex_trylock(&g_driver_feedback_queue_lock) != 0) {
+        g_driver_feedback_queue_busy_drop_count++;
+        return false;
+    }
+
+    if (g_driver_feedback_queue_count >= kDriverFeedbackQueueCapacity) {
+        g_driver_feedback_queue_drop_count++;
+        pthread_mutex_unlock(&g_driver_feedback_queue_lock);
+        return false;
+    }
+
+    QueuedDriverFeedback *item = &g_driver_feedback_queue[g_driver_feedback_queue_write_index];
+    item->kind = 2;
+    item->status = 0;
+    item->data1 = 0;
+    item->data2 = 0;
+    item->length = length;
+    memcpy(item->bytes, bytes, length);
+    g_driver_feedback_queue_write_index =
+        (g_driver_feedback_queue_write_index + 1) % kDriverFeedbackQueueCapacity;
+    g_driver_feedback_queue_count++;
+    g_driver_feedback_queue_enqueued_count++;
+    pthread_mutex_unlock(&g_driver_feedback_queue_lock);
+    return true;
+}
+
+static bool pop_driver_feedback(QueuedDriverFeedback *item)
+{
+    if (item == NULL) {
+        return false;
+    }
+
+    pthread_mutex_lock(&g_driver_feedback_queue_lock);
+    if (g_driver_feedback_queue_count == 0) {
+        pthread_mutex_unlock(&g_driver_feedback_queue_lock);
+        return false;
+    }
+
+    *item = g_driver_feedback_queue[g_driver_feedback_queue_read_index];
+    g_driver_feedback_queue_read_index =
+        (g_driver_feedback_queue_read_index + 1) % kDriverFeedbackQueueCapacity;
+    g_driver_feedback_queue_count--;
+    pthread_mutex_unlock(&g_driver_feedback_queue_lock);
+    return true;
+}
+
+static void service_queued_driver_feedback(void)
+{
+    for (uint32_t i = 0; i < kDriverFeedbackQueueDrainPerPoll; ++i) {
+        QueuedDriverFeedback item;
+        if (!pop_driver_feedback(&item)) {
+            return;
+        }
+
+        kern_return_t ret = kIOReturnBadArgument;
+        if (item.kind == 1) {
+            ret = send_debug_midi(kControlPort, item.status, item.data1, item.data2);
+        } else if (item.kind == 2) {
+            ret = send_debug_midi_bytes(kControlPort, item.bytes, item.length);
+        }
+
+        if (ret == KERN_SUCCESS) {
+            g_driver_feedback_queue_sent_count++;
+            continue;
+        }
+
+        if (ret != kIOReturnNotReady && g_forward_feedback_to_driver) {
+            g_driver_feedback_queue_error_count++;
+            fprintf(stderr,
+                    "bridge: failed to send queued MIDI feedback to driver: 0x%08x (%s)\n",
+                    ret,
+                    mach_error_string(ret));
+        }
+    }
+}
+
 static void service_pending_release_led_relatches(void)
 {
     uint64_t now = monotonic_ns();
@@ -808,21 +947,13 @@ static void midi_read_proc(const MIDIPacketList *packet_list, void *read_proc_re
         if (packet->length > 0 && packet->data[0] == 0xf0u) {
             uint8_t decision = classify_sysex_forward_decision(packet->data, packet->length);
             if (decision == kDigi003SysexDecisionForward) {
-                kern_return_t ret = send_debug_midi_bytes(kControlPort, packet->data, packet->length);
+                bool queued = enqueue_driver_feedback_bytes(packet->data, packet->length);
                 if (g_verbose) {
-                    printf("from CoreMIDI sysex len=%u -> driver ret=0x%08x%s\n",
+                    printf("from CoreMIDI sysex len=%u -> driver queued=%d%s\n",
                            packet->length,
-                           ret,
+                           queued ? 1 : 0,
                            g_forward_feedback_to_driver ? "" : " (disabled)");
                     fflush(stdout);
-                }
-                if (ret != KERN_SUCCESS &&
-                    ret != kIOReturnNotReady &&
-                    g_forward_feedback_to_driver) {
-                    fprintf(stderr,
-                            "bridge: failed to send MIDI sysex feedback to driver: 0x%08x (%s)\n",
-                            ret,
-                            mach_error_string(ret));
                 }
             } else if (g_verbose && decision == kDigi003SysexDecisionBlockedVControlMeter) {
                 printf("from CoreMIDI sysex len=%u -> driver blocked v-control meter-like frame "
@@ -907,26 +1038,18 @@ static void midi_read_proc(const MIDIPacketList *packet_list, void *read_proc_re
                                                 &driver_data1,
                                                 &driver_data2);
 
-            kern_return_t ret = send_debug_midi(kControlPort, driver_status, driver_data1, driver_data2);
+            bool queued = enqueue_driver_feedback_short(driver_status, driver_data1, driver_data2);
             if (g_verbose) {
-                printf("from CoreMIDI msg: %02x %02x %02x -> driver %02x %02x %02x ret=0x%08x%s\n",
+                printf("from CoreMIDI msg: %02x %02x %02x -> driver %02x %02x %02x queued=%d%s\n",
                        status,
                        data1,
                        data2,
                        driver_status,
                        driver_data1,
                        driver_data2,
-                       ret,
+                       queued ? 1 : 0,
                        g_forward_feedback_to_driver ? "" : " (disabled)");
                 fflush(stdout);
-            }
-            if (ret != KERN_SUCCESS &&
-                ret != kIOReturnNotReady &&
-                g_forward_feedback_to_driver) {
-                fprintf(stderr,
-                        "bridge: failed to send MIDI feedback to driver: 0x%08x (%s)\n",
-                        ret,
-                        mach_error_string(ret));
             }
         }
         packet = MIDIPacketNext(packet);
@@ -1101,6 +1224,7 @@ int main(int argc, char **argv)
             last_count = decoded_count;
         }
 
+        service_queued_driver_feedback();
         service_pending_release_led_relatches();
         service_led_state_sync();
         usleep(poll_ms * 1000u);
@@ -1139,6 +1263,18 @@ int main(int argc, char **argv)
     if (g_startup_led_held_feedback_count != 0) {
         printf("bridge: held %llu select/solo feedback frames during startup\n",
                (unsigned long long)g_startup_led_held_feedback_count);
+    }
+    if (g_driver_feedback_queue_enqueued_count != 0 ||
+        g_driver_feedback_queue_sent_count != 0 ||
+        g_driver_feedback_queue_drop_count != 0 ||
+        g_driver_feedback_queue_busy_drop_count != 0 ||
+        g_driver_feedback_queue_error_count != 0) {
+        printf("bridge: queued feedback enqueued=%llu sent=%llu dropped=%llu busy_dropped=%llu errors=%llu\n",
+               (unsigned long long)g_driver_feedback_queue_enqueued_count,
+               (unsigned long long)g_driver_feedback_queue_sent_count,
+               (unsigned long long)g_driver_feedback_queue_drop_count,
+               (unsigned long long)g_driver_feedback_queue_busy_drop_count,
+               (unsigned long long)g_driver_feedback_queue_error_count);
     }
     printf("bridge: stopped\n");
     return 0;

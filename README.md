@@ -9,8 +9,8 @@ Current developer beta:
 
 ```text
 Digi 003 FireWire Driver 0.2.194 beta 1
-Driver version: 0.2.194/394
-Known working local commit: 9e5c148
+Driver version: 0.2.194/397
+Release tag: v0.2.194-beta.1
 ```
 
 This is the first build that is useful as a community test milestone:
@@ -24,6 +24,8 @@ This is the first build that is useful as a community test milestone:
 - The CoreMIDI bridge exposes the control-surface port for V-Control/Pro Tools
   HUI workflows.
 - Motor fader, LED, and display feedback work in the local development setup.
+- HUI feedback is queued asynchronously so Pro Tools plugin/menu loading is not
+  blocked by DriverKit user-client calls.
 
 This is still a developer beta, not a ready-to-install public release. Normal
 distribution is blocked until Apple grants distribution-capable DriverKit

@@ -14,6 +14,8 @@ FireWire DriverKit project.
 - CoreMIDI bridge exposes the Digi 003 control-surface port.
 - V-Control/Pro Tools HUI workflow works in the local development setup.
 - Motor fader, LED, and display feedback are working in local testing.
+- HUI feedback from CoreMIDI to the DriverKit user client is queued
+  asynchronously, which avoids blocking Pro Tools during plugin/menu loading.
 
 ## Verified Locally
 
