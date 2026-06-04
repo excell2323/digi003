@@ -383,7 +383,7 @@ constexpr uint32_t kAudioOutputBufferFrameCount = 1024;
 constexpr uint32_t kAudioOutputRingBufferFrameCount = 65536;
 constexpr uint32_t kAudioOutputChannelCount = 8;
 constexpr uint32_t kAudioOutputBufferOffsetMode = 1;
-constexpr uint32_t kAudioOutputRingPrebufferFrames = 3072;
+constexpr uint32_t kAudioOutputRingPrebufferFrames = 1024;
 constexpr uint32_t kAudioOutputRingKeepFrames = 0;
 constexpr uint32_t kAudioRuntimeCallbackRestartEnabled = 1;
 constexpr uint32_t kAudioRuntimeRestartReasonInputCallback = 1;
@@ -420,9 +420,9 @@ constexpr uint32_t kDigiLiveSequenceReplayMovingQueuePackets = 512;
 constexpr uint32_t kDigiLiveSequenceReplayMovingUpdatePackets = 80;
 constexpr uint32_t kDigiLiveSequenceReplayMovingLeadPackets = 4096;
 constexpr uint32_t kDigiLiveOutputPayloadUpdateEnabled = 1;
-constexpr uint32_t kDigiLiveOutputLeadPackets = 1024;
-constexpr uint32_t kDigiLiveOutputServiceAheadPackets = 256;
-constexpr uint32_t kDigiLiveOutputSilenceAheadPackets = 1024;
+constexpr uint32_t kDigiLiveOutputLeadPackets = 256;
+constexpr uint32_t kDigiLiveOutputServiceAheadPackets = 128;
+constexpr uint32_t kDigiLiveOutputSilenceAheadPackets = 256;
 constexpr uint32_t kDigiLiveOutputMaxPacketsPerPush = 512;
 constexpr uint32_t kDigiLiveOutputStopSilencePushCount = 2;
 constexpr uint32_t kDigiLiveRxCadencePeriodPackets = 80;
@@ -1141,6 +1141,7 @@ uint64_t gPowerStateOnCount = 0;
 uint64_t gPowerStateOffCount = 0;
 uint64_t gPowerStateLowCount = 0;
 uint64_t gPowerStateLiveStopCount = 0;
+uint32_t gPowerStateRestartArmed = 0;
 uint64_t gPowerStateWakeRestartRequestCount = 0;
 uint32_t gAudioDeviceStartIOCount = 0;
 uint32_t gAudioDeviceStopIOCount = 0;
@@ -4240,6 +4241,7 @@ PublishAudioRuntimeDiagnostics()
     AddNumberProperty(properties, "ProbePowerStateOffCount", gPowerStateOffCount, 64);
     AddNumberProperty(properties, "ProbePowerStateLowCount", gPowerStateLowCount, 64);
     AddNumberProperty(properties, "ProbePowerStateLiveStopCount", gPowerStateLiveStopCount, 64);
+    AddNumberProperty(properties, "ProbePowerStateRestartArmed", gPowerStateRestartArmed, 32);
     AddNumberProperty(properties,
                       "ProbePowerStateWakeRestartRequestCount",
                       gPowerStateWakeRestartRequestCount,
@@ -5646,6 +5648,7 @@ ConfigureAudioDevice(FireWireOHCIProbe * driver)
     gPowerStateOffCount = 0;
     gPowerStateLowCount = 0;
     gPowerStateLiveStopCount = 0;
+    gPowerStateRestartArmed = 0;
     gPowerStateWakeRestartRequestCount = 0;
     gAudioDeviceStartIOCount = 0;
     gAudioDeviceStopIOCount = 0;
@@ -12659,6 +12662,13 @@ IMPL(FireWireOHCIProbe, SetPowerState)
     if (poweredOn) {
         gPowerStateOnCount++;
     } else {
+        bool shouldRestartOnWake =
+            gAudioRuntimeDeviceStarted != 0 ||
+            gAudioRefreshWorkerRunning != 0 ||
+            DigiLiveStreamMayNeedStop();
+        if (shouldRestartOnWake) {
+            gPowerStateRestartArmed = 1;
+        }
         if ((powerFlags & kIOServicePowerCapabilityLow) != 0) {
             gPowerStateLowCount++;
         } else {
@@ -12679,7 +12689,8 @@ IMPL(FireWireOHCIProbe, SetPowerState)
     kern_return_t ret = SetPowerState(powerFlags, SUPERDISPATCH);
     gPowerStateLastRet = ReturnCodeToProperty(ret);
 
-    if (ret == kIOReturnSuccess && poweredOn && gAudioRuntimeDeviceStarted != 0) {
+    if (ret == kIOReturnSuccess && poweredOn && gPowerStateRestartArmed != 0) {
+        gPowerStateRestartArmed = 0;
         gPowerStateWakeRestartRequestCount++;
         RequestAudioRuntimeRestart(kAudioRuntimeRestartReasonPowerOn);
     }
