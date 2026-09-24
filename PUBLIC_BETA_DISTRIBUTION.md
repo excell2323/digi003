@@ -6,12 +6,12 @@ devices.
 
 ## Current Gate
 
-The current build is a local development build. It is useful for source release
-and close testing, but it is not a normal public binary distribution until
-Apple grants distribution-capable DriverKit entitlements and the app/driver are
-Developer-ID signed and notarized.
+The public beta signing path is now in place. Apple has granted the required
+Developer ID provisioning profiles for the host app, DriverKit extension, and
+MIDI bridge helper. The build can be Developer-ID signed and packaged; the final
+remaining release gate is notarization and stapling of the installer package.
 
-Requested in Apple Developer on 2026-05-21:
+Requested in Apple Developer on 2026-05-21 and granted by 2026-09-24:
 
 ```text
 com.axelheckert.driver.FireWireOHCIProbe:
@@ -143,27 +143,29 @@ approve the system extension in macOS System Settings.
 ## Public Beta Work Plan
 
 1. Request Apple distribution-capable DriverKit/System Extension entitlements.
+   Done.
 2. After approval, confirm the entitlements appear on the Bundle IDs in Apple
-   Developer.
-3. Create or download Developer ID certificates:
+   Developer. Done.
+3. Create or download Developer ID certificates. Done:
    - Developer ID Application
    - Developer ID Installer
-4. Create distribution provisioning profiles for:
+4. Create distribution provisioning profiles. Done:
    - host app
    - DriverKit extension
    - MIDI bridge helper/app, once bundled
-5. Update signing scripts to support:
+5. Update signing scripts to support. Done:
    - Apple Development local builds
    - Developer ID public builds
    - distribution provisioning profiles
 6. Package the MIDI bridge as a signed helper/app instead of relying on a loose
-   command-line binary.
-7. Build a `.pkg` installer that installs:
+   command-line binary. Done.
+7. Build a `.pkg` installer that installs. Done:
    - `/Applications/FireWireOHCIProbeLoader.app`
-   - the MIDI bridge helper/app or support files
-   - launchd job for the MIDI bridge
-8. Notarize the `.pkg` with `xcrun notarytool`.
-9. Staple the notarization ticket with `xcrun stapler`.
+   - `/Applications/Digi003MIDIBridge.app`
+   - `/Library/Application Support/Digi003/digi003-midi-bridge-agent.sh`
+   - `/Library/LaunchAgents/com.axelheckert.digi003-midi-bridge.plist`
+8. Notarize the `.pkg` with `xcrun notarytool`. Pending.
+9. Staple the notarization ticket with `xcrun stapler`. Pending.
 10. Verify with Gatekeeper:
 
 ```sh
@@ -176,6 +178,38 @@ pkgutil --check-signature Digi003.pkg
    - source archive
    - release notes
    - tester checklist
+
+## Build Commands
+
+Developer-ID sign and package the current public beta:
+
+```sh
+./scripts/build-public-beta-pkg.sh
+```
+
+The script builds the DriverKit extension, host app, and MIDI bridge app, embeds
+Developer ID provisioning profiles, signs with:
+
+```text
+Developer ID Application: Axel Heckert (7H3ND356AV)
+Developer ID Installer: Axel Heckert (7H3ND356AV)
+```
+
+and writes:
+
+```text
+Packages/PublicBeta/Digi003-FireWire-0.2.194.398-beta.pkg
+```
+
+The package will be rejected by Gatekeeper until it is notarized:
+
+```sh
+xcrun notarytool submit Packages/PublicBeta/Digi003-FireWire-0.2.194.398-beta.pkg \
+  --keychain-profile <profile> \
+  --wait
+xcrun stapler staple Packages/PublicBeta/Digi003-FireWire-0.2.194.398-beta.pkg
+spctl -a -vvv -t install Packages/PublicBeta/Digi003-FireWire-0.2.194.398-beta.pkg
+```
 
 ## Tester-Facing Requirements
 
