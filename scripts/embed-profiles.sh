@@ -19,7 +19,8 @@ find_profile() {
             find "$HOME/Library/MobileDevice/Provisioning Profiles" -maxdepth 1 -type f \( -name '*.provisionprofile' -o -name '*.mobileprovision' \)
     } 2>/dev/null | while IFS= read -r profile; do
         tmp="$(mktemp)"
-        if security cms -D -i "$profile" > "$tmp" 2>/dev/null; then
+        if security cms -D -i "$profile" > "$tmp" 2>/dev/null ||
+            openssl smime -verify -inform der -noverify -in "$profile" -out "$tmp" >/dev/null 2>/dev/null; then
             app_id="$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' "$tmp" 2>/dev/null || true)"
             if [ -z "$app_id" ]; then
                 app_id="$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:com.apple.application-identifier' "$tmp" 2>/dev/null || true)"
